@@ -1,10 +1,12 @@
-import numpy as np
-from typing import Optional, Any, Tuple
 from dataclasses import dataclass
-from scipy.linalg import solve_continuous_are
-from koopman.simulation.animation import PlotElement, PlotEnvironment
+from typing import Any, Optional, Tuple
+
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.linalg import solve_continuous_are
 from spatialmath.base import angle_wrap
+
+from koopman.simulation.animation import PlotElement, PlotEnvironment
 
 
 class DynamicalSystem:
