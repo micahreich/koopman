@@ -1,0 +1,7 @@
+repos:
+  - repo: https://github.com/google/yapf
+    rev: main
+    hooks:
+      - id: yapf
+        args: ["--style", ".style.yapf", "--recursive", "--in-place"]
+        files: "koopman/.*\\.py$"

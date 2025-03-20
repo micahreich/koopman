@@ -1,0 +1,5 @@
+[style]
+based_on_style = pep8
+column_limit = 120
+spaces_around_power_operator = true
+allow_multiline_lambdas = true
