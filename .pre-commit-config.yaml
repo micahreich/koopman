@@ -1,7 +1,14 @@
 repos:
   - repo: https://github.com/google/yapf
-    rev: main
+    rev: v0.43.0
     hooks:
       - id: yapf
         args: ["--style", ".style.yapf", "--recursive", "--in-place"]
+        files: "koopman/.*\\.py$"
+
+  - repo: https://github.com/pycqa/isort
+    rev: 6.0.1  # Use the latest stable isort version
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]  # Uses Black-compatible import sorting
         files: "koopman/.*\\.py$"
