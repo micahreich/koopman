@@ -4,6 +4,7 @@ from typing import Any, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.linalg import solve_continuous_are
+from spatialmath import SO2
 from spatialmath.base import angle_wrap
 
 from koopman.simulation.animation import PlotElement, PlotEnvironment
@@ -49,6 +50,9 @@ class DynamicalSystem:
             np.asarray(self.u_history),
         )
 
+    def interp_states(self, t, x0, x1):
+        return t * x0 + (1 - t) * x1
+
     def query_history(self, t: float) -> Tuple[np.ndarray, np.ndarray]:
         assert self.t_history is not None, "No time history to query"
 
@@ -66,7 +70,7 @@ class DynamicalSystem:
             alpha_hi = (t - t_lo) / (t_hi - t_lo)
             alpha_lo = 1.0 - alpha_hi
 
-        x_interp = alpha_lo * self.x_history[idx_lo] + alpha_hi * self.x_history[idx_hi]
+        x_interp = self.interp_states(alpha_lo, self.x_history[idx_lo], self.x_history[idx_hi])
 
         if idx_hi >= len(self.u_history):
             idx_lo = idx_hi = len(self.u_history) - 1
@@ -78,7 +82,6 @@ class DynamicalSystem:
 
 
 class Pendulum(DynamicalSystem):
-
     @dataclass
     class Params:
         m: float  # Mass of the pendulum
@@ -91,12 +94,21 @@ class Pendulum(DynamicalSystem):
     def __init__(self, params: Params) -> None:
         super().__init__("Pendulum", params)
 
-    def project_state(self, x: np.ndarray) -> np.ndarray:
-        if len(x.shape) == 2:
-            x[:, 0] = angle_wrap(x[:, 0], mode="0:2pi")
-        else:
-            x[0] = angle_wrap(x[0], mode="0:2pi")
-        return x
+    # def project_state(self, x: np.ndarray) -> np.ndarray:
+    #     if len(x.shape) == 2:
+    #         x[:, 0] = angle_wrap(x[:, 0], mode="0:2pi")
+    #     else:
+    #         x[0] = angle_wrap(x[0], mode="0:2pi")
+    #     return x
+
+    # def interp_states(self, t, x0, x1):
+    #     linterp_x = super().interp_states(t, x0, x1)
+
+    #     s1, s2 = SO2(x0[0]), SO2(x1[0])
+    #     theta_interp = s1.interp(s2, t)
+
+    #     linterp_x[0] = theta_interp.theta(unit='rad')
+    #     return linterp_x
 
     def batch_dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         N1, nx = x.shape
@@ -113,9 +125,33 @@ class Pendulum(DynamicalSystem):
 
         return np.column_stack([theta_dot, theta_ddot])  # [theta_dot, theta_ddot]
 
+    class PlotElement(PlotElement):
+        def __init__(self, env: PlotEnvironment, sys: "Pendulum", rod_color='black') -> None:
+            super().__init__(env)
+
+            self.sys = sys
+            self.l = sys.params.l  # Length of the pendulum
+
+            # Draw the pendulum rod and bob
+            (self.rod, ) = self.env.ax.plot([], [], 'o-', lw=2, markersize=5, c=rod_color, markerfacecolor='gray')
+
+            # Set axis limits based on the pendulum length
+            self.env.set_xlim(-self.l * 1.2, self.l * 1.2)
+            self.env.set_ylim(-self.l * 1.2, self.l * 1.2)
+
+        def update(self, t):
+            state, _ = self.sys.query_history(t)  # Get the current state of the pendulum
+            theta = state[0]  # Extract the pendulum angle
+
+            # Compute pendulum end position
+            pole_x = self.l * np.sin(theta)
+            pole_y = -self.l * np.cos(theta)
+
+            # Update pendulum rod and bob
+            self.rod.set_data([0, pole_x], [0, pole_y])
+
 
 class CartPole(DynamicalSystem):
-
     @dataclass
     class Params:
         m_c: float
@@ -163,7 +199,6 @@ class CartPole(DynamicalSystem):
         return np.column_stack([v, theta_dot, x_ddot, theta_ddot])
 
     class PlotElement(PlotElement):
-
         def __init__(self, env: PlotEnvironment, sys: "CartPole", cart_color='blue') -> None:
             super().__init__(env)
 
@@ -215,18 +250,3 @@ if __name__ == "__main__":
     ubar = np.tile(ubar, (5, 1))
 
     print(cart_pole.batch_dynamics(xbar, ubar))
-
-    # ubar = torch.tensor([0.], dtype=torch.float32)
-    # ubar = torch.tile(ubar, dims=(100, 1))
-
-    # print(cart_pole.batch_dynamics(xbar, ubar))
-    # print(cart_pole.dynamics(xbar, ubar))
-
-    # A = torch_to_numpy(torch.autograd.functional.jacobian(lambda _x : cart_pole.dynamics(_x, ubar), xbar))
-    # B = torch_to_numpy(torch.autograd.functional.jacobian(lambda _u : cart_pole.dynamics(xbar, _u), ubar))
-    # Q = np.eye(4)
-    # R = np.eye(1)
-    # P = solve_continuous_are(A, B, Q, R)
-    # K = np.linalg.inv(R) @ B.T @ P
-
-    # print(A.shape, B.shape, K.shape)

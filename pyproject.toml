@@ -1,23 +1,32 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "koopman"
 version = "0.1.0"
-description = "A short description of my package"
-readme = "README.md"
+description = "Koopman dynamics"
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Micah Reich", email = "mreich@andrew.cmu.edu" },
+    { name = "Gleb Ryabstev", email = "gryabste@andrew.cmu.edu" }
 ]
-license = { file = "LICENSE" }
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.7"
+
 dependencies = [
-    "numpy",   # Add dependencies here
-    "requests"
+    "numpy",
+    "matplotlib"
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "black", "mypy"]
+dev = ["pytest", "black", "flake8"]
+
+[project.scripts]
+my_tool = "koopman.main:main"
 
 [tool.setuptools]
-packages = ["koopman"]
+packages = ["koopman"] 
+
+[tool.setuptools.package-data]
+"koopman" = ["*.txt", "*.json"] 

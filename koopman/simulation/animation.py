@@ -22,7 +22,6 @@ def interp_x_u_history(ts, xs, us, ts_query):
 
 
 class PlotEnvironment:
-
     def __init__(self, fig, ax):
         self.fig = fig
         self.ax = ax
@@ -78,7 +77,6 @@ class PlotEnvironment:
 
 
 class PlotElement:
-
     def __init__(self, env: PlotEnvironment) -> None:
         self.env = env
 

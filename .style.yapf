@@ -3,3 +3,5 @@ based_on_style = pep8
 column_limit = 120
 spaces_around_power_operator = true
 allow_multiline_lambdas = true
+blank_line_before_class_docstring = false
+blank_line_before_nested_class_or_def = false
