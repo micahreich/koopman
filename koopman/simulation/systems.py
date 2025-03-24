@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
 
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.linalg import solve_continuous_are

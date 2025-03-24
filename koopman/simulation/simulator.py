@@ -37,7 +37,7 @@ def simulate_batch(sys: DynamicalSystem,
 
     x_hist[:, 0, :] = x0
 
-    for i, t in enumerate(tqdm(ts[1:], desc="Simulation progress", total=len(ts) - 1)):
+    for i, t in enumerate(tqdm(ts[:-1], desc="Simulation progress", total=len(ts) - 1)):
         observation = obs_fn(i, x_hist)
         u_hist[:, i, :] = u(t, observation)
 
