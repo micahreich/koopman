@@ -14,6 +14,7 @@ from koopman.simulation.animation import PlotElement, PlotEnvironment
 class DynamicalSystem:
     nx = None
     nu = None
+    nz = None
 
     def __init__(self, name: Optional[str] = None, params: Optional[Any] = None) -> None:
         self.name = name
@@ -35,6 +36,9 @@ class DynamicalSystem:
 
     def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         return self.batch_dynamics(x[None, :], u[None, :])[0, ...]
+
+    def koopman_observables(self, x: np.ndarray) -> np.ndarray:
+        raise NotImplementedError
 
     def clear_history(self) -> None:
         self.t_history = self.x_history = self.u_history = None
@@ -77,7 +81,8 @@ class DynamicalSystem:
             idx_lo = idx_hi = len(self.u_history) - 1
             alpha_hi, alpha_lo = 1.0, 0.0
 
-        u_interp = alpha_lo * self.u_history[idx_lo] + alpha_hi * self.u_history[idx_hi]
+        # Zero-order hold for control inputs
+        u_interp = self.u_history[idx_lo]
 
         return np.asarray(x_interp), np.asarray(u_interp)
 
@@ -91,6 +96,7 @@ class Pendulum(DynamicalSystem):
 
     nx = 2  # [theta, theta_dot]
     nu = 1  # Torque input
+    nz = 8  # Number of Koopman observables
 
     def __init__(self, params: Params) -> None:
         super().__init__("Pendulum", params)
@@ -110,6 +116,40 @@ class Pendulum(DynamicalSystem):
 
     #     linterp_x[0] = theta_interp.theta(unit='rad')
     #     return linterp_x
+
+    @classmethod
+    def koopman_observables(cls, x):
+        if len(x.shape) == 1:
+            x = x.reshape((1, 1, x.shape[0]))
+        elif len(x.shape) == 2:
+            x = x.reshape((1, x.shape[0], x.shape[1]))
+
+        N, H, nx = x.shape
+
+        assert nx == cls.nx
+
+        thetas = np.expand_dims(x[:, :, 0], axis=-1)
+        omegas = np.expand_dims(x[:, :, 1], axis=-1)
+        sin_theta = np.sin(thetas)
+        cos_theta = np.cos(thetas)
+
+        observables = np.concatenate(
+            [
+                thetas,
+                omegas,
+                # np.ones_like(thetas),
+                sin_theta,
+                cos_theta,
+                sin_theta * omegas,
+                cos_theta * omegas,
+                sin_theta * omegas ** 2,
+                cos_theta * omegas ** 2
+            ],
+            axis=-1)
+
+        assert observables.shape == (N, H, cls.nz)
+
+        return observables.squeeze()
 
     def batch_dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         N1, nx = x.shape
