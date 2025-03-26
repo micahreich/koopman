@@ -24,7 +24,8 @@ def simulate_batch(sys: DynamicalSystem,
                    dt: float,
                    u: Callable,
                    x0: np.ndarray,
-                   obs_fn: Callable = lambda i, x_hist: x_hist[:, i, :]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                   obs_fn: Callable = lambda i, x_hist: x_hist[:, i, :],
+                   pbar=True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     N, nx = x0.shape
 
     ts = np.arange(0, tf + dt, dt)
@@ -37,12 +38,17 @@ def simulate_batch(sys: DynamicalSystem,
 
     x_hist[:, 0, :] = x0
 
-    for i, t in enumerate(tqdm(ts[:-1], desc="Simulation progress", total=len(ts) - 1)):
+    if pbar:
+        iterator = tqdm(ts[:-1], desc="Simulation progress", total=len(ts) - 1)
+    else:
+        iterator = ts[:-1]
+
+    for i, t in enumerate(iterator):
         observation = obs_fn(i, x_hist)
         u_hist[:, i, :] = u(t, observation)
 
         # Run one RK4 integration step
-        x_hist[:, i + 1, :] = rk4_step(sys.batch_dynamics, x_hist[:, i, :], u_hist[:, i, :], dt)
+        x_hist[:, i + 1, :] = rk4_step(sys.dynamics, x_hist[:, i, :], u_hist[:, i, :], dt)
 
         # Project state if necessary to keep it in the manifold
         x_hist[:, i + 1, :] = sys.project_state(x_hist[:, i + 1, :])
@@ -56,11 +62,12 @@ def simulate(sys: DynamicalSystem,
              u: Callable,
              x0: np.ndarray,
              log: bool = True,
-             obs_fn: Callable = lambda i, x_hist: x_hist[i]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+             obs_fn: Callable = lambda i, x_hist: x_hist[i, :],
+             pbar=True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     u_modified = lambda t, x: np.expand_dims(u(t, np.squeeze(x, axis=0)), axis=0)
     obs_fn_modified = lambda i, x_hist: np.expand_dims(obs_fn(i, np.squeeze(x_hist, axis=0)), axis=0)
 
-    ts, x_hist, u_hist = simulate_batch(sys, tf, dt, u_modified, np.expand_dims(x0, axis=0), obs_fn_modified)
+    ts, x_hist, u_hist = simulate_batch(sys, tf, dt, u_modified, np.expand_dims(x0, axis=0), obs_fn_modified, pbar)
 
     if log:
         sys.set_history(ts, np.squeeze(x_hist, axis=0), np.squeeze(u_hist, axis=0))

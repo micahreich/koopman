@@ -31,11 +31,11 @@ class DynamicalSystem:
     def project_state(self, x: np.ndarray) -> np.ndarray:
         return x
 
-    def batch_dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
+    def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
-    def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
-        return self.batch_dynamics(x[None, :], u[None, :])[0, ...]
+    # def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
+    #     return self.batch_dynamics(x[None, :], u[None, :])[0, ...]
 
     def koopman_observables(self, x: np.ndarray) -> np.ndarray:
         raise NotImplementedError
@@ -85,6 +85,38 @@ class DynamicalSystem:
         u_interp = self.u_history[idx_lo]
 
         return np.asarray(x_interp), np.asarray(u_interp)
+
+
+class NonlinearAttractor2D(DynamicalSystem):
+    @dataclass
+    class Params:
+        mu: float
+        lam: float
+
+    nx = 2
+    nu = 1
+
+    def __init__(self, params: Params) -> None:
+        assert params.mu > 0 and params.lam > 0
+
+        super().__init__("StableLTIAttractor2D", params)
+
+    def dynamics(self, x, u):
+        is_batch = len(x.shape) == 2
+
+        if not is_batch:
+            x = np.expand_dims(x, axis=0)
+
+        x1 = x[:, 0, None]
+        x2 = x[:, 1, None]
+
+        x1_dot = -self.params.mu * x1
+        x2_dot = -self.params.lam * (x2 - x1 ** 2) + u
+
+        if is_batch:
+            return np.column_stack([x1_dot, x2_dot])
+        else:
+            return np.squeeze(np.column_stack([x1_dot, x2_dot]), axis=0)
 
 
 class Pendulum(DynamicalSystem):
@@ -151,7 +183,12 @@ class Pendulum(DynamicalSystem):
 
         return observables.squeeze()
 
-    def batch_dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
+    def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
+        is_batch = len(x.shape) == 2
+
+        if not is_batch:
+            x = np.expand_dims(x, axis=0)
+
         N1, nx = x.shape
         N2, nu = u.shape
 
@@ -164,7 +201,10 @@ class Pendulum(DynamicalSystem):
         # Compute angular acceleration
         theta_ddot = (-self.params.g / self.params.l) * np.sin(theta) + (u / (self.params.m * self.params.l ** 2))
 
-        return np.column_stack([theta_dot, theta_ddot])  # [theta_dot, theta_ddot]
+        if is_batch:
+            return np.column_stack([theta_dot, theta_ddot])
+        else:
+            return np.squeeze(np.column_stack([theta_dot, theta_ddot], axis=0))  # [theta_dot, theta_ddot]
 
     class PlotElement(PlotElement):
         def __init__(self, env: PlotEnvironment, sys: "Pendulum", rod_color='black') -> None:
