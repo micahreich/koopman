@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import einops
 import numpy as np
@@ -17,6 +17,7 @@ weight_init = {
     'uniform': init.uniform_,
     'normal': init.normal_,
     'constant': init.constant_,
+    'zeros': init.zeros_,
     'eye': init.eye_,
     'dirac': init.dirac_,
     'xavier_uniform_': init.xavier_uniform_,
@@ -32,7 +33,7 @@ class MLP(nn.Module):
         dims: List[int],
         activation=nn.Mish,
         use_layernorm=False,
-        params_init: str = 'xavier_uniform',
+        params_init: Optional[str] = None,
         params_init_args: dict = {},
     ):
         assert len(dims) >= 2
@@ -47,12 +48,14 @@ class MLP(nn.Module):
 
         for i in range(len(dims) - 1):
             m = nn.Linear(dims[i], dims[i + 1])
-            # weight_init[params_init](m.weight, **params_init_args)
 
             self.layers.append(m)
 
             if use_layernorm and i < len(dims) - 2:  # Don't apply LayerNorm on output layer
                 self.layernorms.append(nn.LayerNorm(dims[i + 1]))
+
+        if params_init is not None:
+            weight_init[params_init](self.layers[-1].weight, **params_init_args)
 
     def forward(self, x):
         for i, layer in enumerate(self.layers[:-1]):
@@ -79,6 +82,8 @@ class KoopmanAutoencoder(nn.Module):
                  activation=nn.Mish,
                  use_layernorm=False):
         super().__init__()
+
+        assert nz > nx, "Latent space dimension must be greater than state space dimension"
 
         self.nx = nx  # Dimension of the state space
         self.nu = nu  # Dimension of the control space
@@ -108,53 +113,119 @@ class KoopmanAutoencoder(nn.Module):
         self.horizon_loss_weight = horizon_loss_weight / loss_weights_sum
         self.L1_loss_weight = L1_loss_weight / loss_weights_sum
 
-        # Build the encoder (MLP)
-        dims = [nx] + hidden_dims + [nz]
+        # Build the encoder (MLP); outputs the observables not including the original state,
+        # which is concatenated on to observables during fwd pass
+        dims = [nx] + hidden_dims + [nz - nx]
 
-        self.encoder = MLP(dims, activation, use_layernorm, params_init='orthogonal')
+        self.encoder = MLP(dims, activation, use_layernorm)
 
-    def loss(self, x_batch, u_batch, z_batch):
-        B, _, _ = x_batch.shape
+        self.param_groups = {
+            'observables': self.encoder.parameters(),
+            'dynamics': [self.A, self.B, self.Cs],
+        }
 
-        # z_vals is the latent representation of all x_vals, i.e.
-        #   z_vals[b, 1, :] = phi(x_vals[b, 1, :])
-        #   z_vals[b, 2, :] = phi(x_vals[b, 2, :])
+    @staticmethod
+    def flatten_batch(x_batch: torch.Tensor) -> torch.Tensor:
+        assert x_batch.dim() == 3, "x_batch must be a 3D tensor"
+        return einops.rearrange(x_batch, 'b h nx -> (b h) nx')
+
+    def unflatten_batch(self, x_flat_batch: torch.Tensor) -> torch.Tensor:
+        assert x_flat_batch.dim() == 2, "x_flat_batch must be a 2D tensor"
+        return einops.rearrange(x_flat_batch, '(b h) nx -> b h nx', h=self.H + 1)
+
+    def _dynamics_jacobian_norm(self, x0: torch.Tensor, u0: torch.Tensor, z0: torch.Tensor, x_flat_batch: torch.Tensor,
+                                u_flat_batch: torch.Tensor, z_flat_batch: torch.Tensor) -> torch.Tensor:
+        # BH, _ = u_flat_batch.shape
+        # B = BH // self.H
+
+        # assert u_flat_batch.shape == (B * self.H, self.nu)
+        # assert x_flat_batch.shape == (B * (self.H + 1), self.nx)
+        # assert z_flat_batch.shape == (B * (self.H + 1), self.nz)
+
+        # # Get the predicted next state
+        # full = torch.arange(x_flat_batch.shape[0], device=z_flat_batch.device)
+        # mask = (full % (self.H + 1)) < self.H
+        # idxs = full[mask]
+        B, _ = x0.shape
+        x1_pred = self.project(self.predict_z_next(z0, u0))
+
+        # x_next_pred_flat_batch = self.project(self.predict_z_next(z_flat_batch[idxs, :], u_flat_batch))
+        # assert x_next_pred_flat_batch.shape == (B * self.H, self.nx)
+
+        n_proj = 10
+        vsx = torch.randn(B, n_proj, self.nx, requires_grad=True)
+
+        grads_x = torch.zeros(B, )
+        grads_u = torch.zeros(B, )
+
+        for i in range(n_proj):
+            vJx, vJu = torch.autograd.grad(x1_pred, (x0, u0), grad_outputs=vsx[:, i, :], create_graph=True)
+
+            grads_x += 1 / n_proj * (torch.norm(vJx, 2, dim=-1) ** 2)
+            grads_u += 1 / n_proj * (torch.norm(vJu, 2, dim=-1) ** 2)
+
+        Jx_norm_mean = grads_x.mean(dim=0)
+        Ju_norm_mean = grads_u.mean(dim=0)
+
+        return Jx_norm_mean, Ju_norm_mean
+
+    def loss(self, xs: Tuple[torch.Tensor, torch.Tensor], us: Tuple[torch.Tensor, torch.Tensor],
+             zs: Tuple[torch.Tensor, torch.Tensor]):
+        #  x_flat_batch: torch.Tensor,
+        #  u_flat_batch: torch.Tensor,
+        #  z_flat_batch: torch.Tensor):
+        # u_batch = self.unflatten_batch(u_flat_batch)
+        # z_batch = self.unflatten_batch(z_flat_batch)
+
+        # z_batch is the latent representation of all x_vals, i.e.
+        #   z_batch[b, 1, :] = phi(x_vals[b, 1, :])
+        #   z_batch[b, 2, :] = phi(x_vals[b, 2, :])
         #   ...
-        #   z_vals[b, H, :] = phi(x_vals[b, H, :])
+        #   z_batch[b, H, :] = phi(x_vals[b, H, :])
 
-        assert u_batch.shape == (B, self.H, self.nu)
-        assert x_batch.shape == (B, self.H + 1, self.nx)
-        assert z_batch.shape == (B, self.H + 1, self.nz)
+        x0, x_horizon = xs
+        u0, u_horizon = us
+        z0, z_horizon = zs
 
-        loss = 0.0
-
-        # (1) Ensure that the state is embedded in the latent vector
-        x_vals_from_projection = self.project(z_batch)
-        loss += self.projection_loss_weight * F.mse_loss(x_batch, x_vals_from_projection, reduction='mean')
+        loss_pred = 0.0
+        loss_l1 = 0.0
 
         # (2) Ensure that phi(x_{t+j+1}) = K z_{t+j} + B u_{t+j} + (sum_i C_i u_{t+j}) * z_{t+j} for j = 0, ..., H-1
-        z_jm1 = z_batch[:, 0, :]
+        z_jm1 = z0
+        u_jm1 = u0
 
-        for j in range(1, self.H + 1):
-            u_jm1 = u_batch[:, j - 1, :]
-
+        for j in range(0, self.H):
             z_j_from_rollout = self.predict_z_next(z_jm1, u_jm1)
-            z_j_from_encoding = z_batch[:, j, :]
+            z_j_from_encoding = z_horizon[:, j, :]
 
-            loss += self.horizon_loss_weight * (self.horizon_loss_weights[j - 1] *
-                                                F.mse_loss(z_j_from_encoding, z_j_from_rollout, reduction='mean'))
+            loss_pred += self.horizon_loss_weights[j] * F.mse_loss(
+                z_j_from_encoding, z_j_from_rollout, reduction='mean')
+
             z_jm1 = z_j_from_rollout
+            u_jm1 = u_horizon[:, j, :]
 
-        # (3) Encourage sparsity in the matrix K to not have redundant information/reduce overfitting
-        loss += self.L1_loss_weight * torch.linalg.matrix_norm(self.A, ord=1)
+        # (2) Encourage sparsity in the matrix K to not have redundant information/reduce overfitting
+        loss_l1 = torch.linalg.matrix_norm(self.A, ord=1)
 
-        return loss
+        loss_by_parts = {
+            'loss_pred': self.horizon_loss_weight * loss_pred / self.H,
+            'loss_l1': self.L1_loss_weight * loss_l1,
+        }
+
+        return loss_by_parts['loss_pred'] + loss_by_parts['loss_l1'], loss_by_parts
 
     def predict_z_next(self, z_jm1: torch.Tensor, u_jm1: torch.Tensor) -> torch.Tensor:
         C_i_u_i_sum = torch.einsum('b j, j m n -> b m n', u_jm1, self.Cs)
         z_j_from_rollout = z_jm1 @ self.A.T + u_jm1 @ self.B.T + torch.einsum('b m n, b n -> b m', C_i_u_i_sum, z_jm1)
 
         return z_j_from_rollout
+
+    def predict_x_next(self, x_jm1: torch.Tensor, u_jm1: torch.Tensor) -> torch.Tensor:
+        z_jm1 = self.forward(x_jm1)
+        z_j_from_rollout = self.predict_z_next(z_jm1, u_jm1)
+        x_j_from_rollout = self.project(z_j_from_rollout)
+
+        return x_j_from_rollout
 
     def project(self, z) -> torch.Tensor:
         if z.dim() == 2:
@@ -163,11 +234,7 @@ class KoopmanAutoencoder(nn.Module):
             return z[:, :, :self.nx]
 
     def forward(self, x_batch):
-        # B, _, _ = x_batch.shape
-
-        # x_batch = einops.rearrange(x_batch, 'b h nx -> (b h) nx')
-
         z_vals = self.encoder(x_batch)
-        # z_vals = einops.rearrange(z_vals, '(b h) nz -> b h nz', b=B)
+        z_vals = torch.cat([x_batch, z_vals], dim=-1)
 
         return z_vals

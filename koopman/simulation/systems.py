@@ -99,7 +99,7 @@ class NonlinearAttractor2D(DynamicalSystem):
     def __init__(self, params: Params) -> None:
         assert params.mu > 0 and params.lam > 0
 
-        super().__init__("StableLTIAttractor2D", params)
+        super().__init__("NonlinearAttractor2D", params)
 
     def dynamics(self, x, u):
         is_batch = len(x.shape) == 2

@@ -13,7 +13,6 @@ SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 attractor = NonlinearAttractor2D(NonlinearAttractor2D.Params(mu=2.0, lam=0.5))
 
 if __name__ == "__main__":
-
     N = 1_000
     x0 = np.random.uniform(-10, 10, (N, 2))
     tf = 8.0
