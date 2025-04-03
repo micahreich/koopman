@@ -68,9 +68,15 @@ class KoopmanDataset(Dataset):
         x_vals = self.x_hist[sys_idx, t_start:t_end, :]
         u_vals = self.u_hist[sys_idx, t_start:t_end - 1, :]
 
-        assert x_vals.shape == (self.pred_horizon + 1, self.nx) and u_vals.shape == (self.pred_horizon, self.nu)
+        x0 = x_vals[0, :]
+        u0 = u_vals[0, :]
+        assert x0.shape == (self.nx, ) and u0.shape == (self.nu, )
 
-        return x_vals, u_vals
+        x_horizon = x_vals[1:, :]
+        u_horizon = u_vals[1:, :]
+        assert x_horizon.shape == (self.pred_horizon, self.nx) and u_horizon.shape == (self.pred_horizon - 1, self.nu)
+
+        return x0, u0, x_horizon, u_horizon
 
 
 if __name__ == "__main__":

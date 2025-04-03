@@ -129,30 +129,15 @@ class KoopmanAutoencoder(nn.Module):
         assert x_batch.dim() == 3, "x_batch must be a 3D tensor"
         return einops.rearrange(x_batch, 'b h nx -> (b h) nx')
 
-    def unflatten_batch(self, x_flat_batch: torch.Tensor) -> torch.Tensor:
+    def unflatten_batch(self, batch_size, x_flat_batch: torch.Tensor) -> torch.Tensor:
         assert x_flat_batch.dim() == 2, "x_flat_batch must be a 2D tensor"
-        return einops.rearrange(x_flat_batch, '(b h) nx -> b h nx', h=self.H + 1)
+        return einops.rearrange(x_flat_batch, '(b h) nx -> b h nx', b=batch_size)
 
-    def _dynamics_jacobian_norm(self, x0: torch.Tensor, u0: torch.Tensor, z0: torch.Tensor, x_flat_batch: torch.Tensor,
-                                u_flat_batch: torch.Tensor, z_flat_batch: torch.Tensor) -> torch.Tensor:
-        # BH, _ = u_flat_batch.shape
-        # B = BH // self.H
-
-        # assert u_flat_batch.shape == (B * self.H, self.nu)
-        # assert x_flat_batch.shape == (B * (self.H + 1), self.nx)
-        # assert z_flat_batch.shape == (B * (self.H + 1), self.nz)
-
-        # # Get the predicted next state
-        # full = torch.arange(x_flat_batch.shape[0], device=z_flat_batch.device)
-        # mask = (full % (self.H + 1)) < self.H
-        # idxs = full[mask]
+    def _dynamics_jacobian_norm(self, x0: torch.Tensor, u0: torch.Tensor, z0: torch.Tensor) -> torch.Tensor:
         B, _ = x0.shape
         x1_pred = self.project(self.predict_z_next(z0, u0))
 
-        # x_next_pred_flat_batch = self.project(self.predict_z_next(z_flat_batch[idxs, :], u_flat_batch))
-        # assert x_next_pred_flat_batch.shape == (B * self.H, self.nx)
-
-        n_proj = 10
+        n_proj = 2
         vsx = torch.randn(B, n_proj, self.nx, requires_grad=True)
 
         grads_x = torch.zeros(B, )
@@ -171,18 +156,6 @@ class KoopmanAutoencoder(nn.Module):
 
     def loss(self, xs: Tuple[torch.Tensor, torch.Tensor], us: Tuple[torch.Tensor, torch.Tensor],
              zs: Tuple[torch.Tensor, torch.Tensor]):
-        #  x_flat_batch: torch.Tensor,
-        #  u_flat_batch: torch.Tensor,
-        #  z_flat_batch: torch.Tensor):
-        # u_batch = self.unflatten_batch(u_flat_batch)
-        # z_batch = self.unflatten_batch(z_flat_batch)
-
-        # z_batch is the latent representation of all x_vals, i.e.
-        #   z_batch[b, 1, :] = phi(x_vals[b, 1, :])
-        #   z_batch[b, 2, :] = phi(x_vals[b, 2, :])
-        #   ...
-        #   z_batch[b, H, :] = phi(x_vals[b, H, :])
-
         x0, x_horizon = xs
         u0, u_horizon = us
         z0, z_horizon = zs
@@ -202,7 +175,9 @@ class KoopmanAutoencoder(nn.Module):
                 z_j_from_encoding, z_j_from_rollout, reduction='mean')
 
             z_jm1 = z_j_from_rollout
-            u_jm1 = u_horizon[:, j, :]
+
+            if j < self.H - 1:
+                u_jm1 = u_horizon[:, j, :]
 
         # (2) Encourage sparsity in the matrix K to not have redundant information/reduce overfitting
         loss_l1 = torch.linalg.matrix_norm(self.A, ord=1)
