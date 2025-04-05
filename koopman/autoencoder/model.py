@@ -73,11 +73,11 @@ class KoopmanAutoencoder(nn.Module):
                  nu: int,
                  nz: int,
                  H: int,
-                 params_init: str = 'xavier_uniform',
+                 params_init: str = 'eye',
                  params_init_args: dict = {},
-                 projection_loss_weight: float = 1.0,
                  horizon_loss_weight: float = 1.0,
-                 L1_loss_weight: float = 1.0,
+                 L1_reg_weight: float = 1.0,
+                 jacobian_reg_weight: float = 0.0,
                  hidden_dims: List[int] = [64],
                  activation=nn.Mish,
                  use_layernorm=False):
@@ -103,15 +103,15 @@ class KoopmanAutoencoder(nn.Module):
         self.P = torch.zeros((nx, nz))
         self.P[:, :nx] = torch.eye(nx)
 
-        self.gamma = 0.9  #1.0
+        self.gamma = 1.0
         self.horizon_loss_weights = self.gamma ** torch.arange(0, self.H)
 
         # Weight different parts of the combined loss differently
-        loss_weights_sum = projection_loss_weight + horizon_loss_weight + L1_loss_weight
+        loss_weights_sum = horizon_loss_weight + L1_reg_weight + jacobian_reg_weight
 
-        self.projection_loss_weight = projection_loss_weight / loss_weights_sum
         self.horizon_loss_weight = horizon_loss_weight / loss_weights_sum
-        self.L1_loss_weight = L1_loss_weight / loss_weights_sum
+        self.L1_reg_weight = L1_reg_weight / loss_weights_sum
+        self.jacobian_reg_weight = jacobian_reg_weight / loss_weights_sum
 
         # Build the encoder (MLP); outputs the observables not including the original state,
         # which is concatenated on to observables during fwd pass
@@ -124,8 +124,7 @@ class KoopmanAutoencoder(nn.Module):
             'dynamics': [self.A, self.B, self.Cs],
         }
 
-    @staticmethod
-    def flatten_batch(x_batch: torch.Tensor) -> torch.Tensor:
+    def flatten_batch(self, x_batch: torch.Tensor) -> torch.Tensor:
         assert x_batch.dim() == 3, "x_batch must be a 3D tensor"
         return einops.rearrange(x_batch, 'b h nx -> (b h) nx')
 
@@ -133,15 +132,20 @@ class KoopmanAutoencoder(nn.Module):
         assert x_flat_batch.dim() == 2, "x_flat_batch must be a 2D tensor"
         return einops.rearrange(x_flat_batch, '(b h) nx -> b h nx', b=batch_size)
 
-    def _dynamics_jacobian_norm(self, x0: torch.Tensor, u0: torch.Tensor, z0: torch.Tensor) -> torch.Tensor:
+    def _dynamics_jacobian_norm(self, x0: torch.Tensor, u0: torch.Tensor, z0: torch.Tensor):
+        device = x0.device
         B, _ = x0.shape
         x1_pred = self.project(self.predict_z_next(z0, u0))
 
         n_proj = 2
-        vsx = torch.randn(B, n_proj, self.nx, requires_grad=True)
+        vsx = torch.randn(B, n_proj, self.nx, requires_grad=True, device=device)
 
-        grads_x = torch.zeros(B, )
-        grads_u = torch.zeros(B, )
+        grads_x = torch.zeros(B, device=device)
+        grads_u = torch.zeros(B, device=device)
+
+        # Estimate the squared Frobenius norm of the discrete-time dynamics Jacobians
+        # using the Girard–Hutchinson randomized trace estimator (||J||_F^2 = Tr(JJ^T)),
+        # see https://arxiv.org/abs/1908.02729
 
         for i in range(n_proj):
             vJx, vJu = torch.autograd.grad(x1_pred, (x0, u0), grad_outputs=vsx[:, i, :], create_graph=True)
@@ -167,29 +171,49 @@ class KoopmanAutoencoder(nn.Module):
         z_jm1 = z0
         u_jm1 = u0
 
+        state_pred_errors = torch.zeros((self.H, ), device=x0.device)
+
         for j in range(0, self.H):
             z_j_from_rollout = self.predict_z_next(z_jm1, u_jm1)
-            z_j_from_encoding = z_horizon[:, j, :]
 
-            loss_pred += self.horizon_loss_weights[j] * F.mse_loss(
-                z_j_from_encoding, z_j_from_rollout, reduction='mean')
+            x_j_from_rollout = self.project(z_j_from_rollout)
+            x_j_gt = x_horizon[:, j, :]
+            # x_j_from_encoding = self.project(z_horizon[:, j, :])
+
+            # z_j_error = z_j_from_encoding - z_j_from_rollout
+            # n1 = torch.linalg.vector_norm(z_j_error, ord=2, dim=-1)
+
+            # loss_pred += self.horizon_loss_weights[j] * torch.mean(n1)
+            state_pred_errors[j] = F.mse_loss(x_j_from_rollout, x_j_gt, reduction='mean')
 
             z_jm1 = z_j_from_rollout
 
             if j < self.H - 1:
                 u_jm1 = u_horizon[:, j, :]
 
+        loss_pred = torch.linalg.norm(state_pred_errors, ord=torch.inf)
+
         # (2) Encourage sparsity in the matrix K to not have redundant information/reduce overfitting
         loss_l1 = torch.linalg.matrix_norm(self.A, ord=1)
 
-        loss_by_parts = {
-            'loss_pred': self.horizon_loss_weight * loss_pred / self.H,
-            'loss_l1': self.L1_loss_weight * loss_l1,
+        # (3) Encourage the dynamics Jacobian to have small Frobenius norm
+        loss_jac_reg = torch.tensor(0.0, device=x0.device)
+        if self.jacobian_reg_weight > 0:
+            Jx_norm_mean, Ju_norm_mean = self._dynamics_jacobian_norm(x0, u0, z0)
+            loss_jac_reg = self.jacobian_reg_weight * (Jx_norm_mean + Ju_norm_mean)
+
+        loss_dict = {
+            'loss_pred': self.horizon_loss_weight * loss_pred,
+            'loss_l1': self.L1_reg_weight * loss_l1,
+            'loss_jac': self.jacobian_reg_weight * loss_jac_reg,
         }
 
-        return loss_by_parts['loss_pred'] + loss_by_parts['loss_l1'], loss_by_parts
+        return loss_dict['loss_pred'] + loss_dict['loss_l1'] + loss_dict['loss_jac'], loss_dict
 
     def predict_z_next(self, z_jm1: torch.Tensor, u_jm1: torch.Tensor) -> torch.Tensor:
+        # Use bilinear form of Koopman dynamcis:
+        #   z_{t+1} = A z_t + B u_t + (sum_i C_i u_t) * z_t
+
         C_i_u_i_sum = torch.einsum('b j, j m n -> b m n', u_jm1, self.Cs)
         z_j_from_rollout = z_jm1 @ self.A.T + u_jm1 @ self.B.T + torch.einsum('b m n, b n -> b m', C_i_u_i_sum, z_jm1)
 

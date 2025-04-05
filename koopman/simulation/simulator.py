@@ -75,7 +75,7 @@ def simulate(sys: DynamicalSystem,
     return ts, np.squeeze(x_hist, axis=0), np.squeeze(u_hist, axis=0)
 
 
-if __name__ == "__main__":
+def simulate_pendulum():
     sys = Pendulum(Pendulum.Params(m=1, l=1, g=9.81))
 
     x0 = np.array([1.0, 0.0])
@@ -93,3 +93,7 @@ if __name__ == "__main__":
     _ = env.render(t_range=(0, tf), fps=30)
 
     plt.show()
+
+
+if __name__ == "__main__":
+    simulate_pendulum()

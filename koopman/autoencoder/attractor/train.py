@@ -1,5 +1,6 @@
 import os
 import random
+from typing import Union
 
 import einops
 import matplotlib.colors as mcolors
@@ -15,13 +16,13 @@ from tqdm import tqdm
 from koopman import utils
 from koopman.autoencoder.dataset import KoopmanDataset
 from koopman.autoencoder.model import KoopmanAutoencoder
-from koopman.autoencoder.train import simulate_with_observables, train
+from koopman.autoencoder.training_loop import simulate_with_observables, train
 from koopman.simulation.systems import NonlinearAttractor2D
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 
-def evaluate(model: KoopmanAutoencoder, dataset: KoopmanDataset, epoch_idx: int, device):
+def evaluate(model: KoopmanAutoencoder, dataset: KoopmanDataset, epoch_idx: Union[str, int], device: torch.device):
     is_training = model.training
     model.eval()
 
@@ -86,7 +87,8 @@ if __name__ == "__main__":
         activation=nn.Mish,
         use_layernorm=False,
         horizon_loss_weight=10.0,
-        L1_loss_weight=0.5,
+        L1_reg_weight=0.5,
+        jacobian_reg_weight=0.0,
     )
 
     train(model, dataset, n_epochs=100, batch_size=64, learning_rate=0.001, evaluate=evaluate, save_dir=SCRIPT_DIR)

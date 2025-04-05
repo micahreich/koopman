@@ -125,10 +125,12 @@ class Pendulum(DynamicalSystem):
         m: float  # Mass of the pendulum
         l: float  # Length of the pendulum
         g: float  # Gravity
+        b: float  # Damping coefficient
 
     nx = 2  # [theta, theta_dot]
     nu = 1  # Torque input
-    nz = 8  # Number of Koopman observables
+
+    # nz = 8  # Number of Koopman observables
 
     def __init__(self, params: Params) -> None:
         super().__init__("Pendulum", params)
@@ -149,39 +151,39 @@ class Pendulum(DynamicalSystem):
     #     linterp_x[0] = theta_interp.theta(unit='rad')
     #     return linterp_x
 
-    @classmethod
-    def koopman_observables(cls, x):
-        if len(x.shape) == 1:
-            x = x.reshape((1, 1, x.shape[0]))
-        elif len(x.shape) == 2:
-            x = x.reshape((1, x.shape[0], x.shape[1]))
+    # @classmethod
+    # def koopman_observables(cls, x):
+    #     if len(x.shape) == 1:
+    #         x = x.reshape((1, 1, x.shape[0]))
+    #     elif len(x.shape) == 2:
+    #         x = x.reshape((1, x.shape[0], x.shape[1]))
 
-        N, H, nx = x.shape
+    #     N, H, nx = x.shape
 
-        assert nx == cls.nx
+    #     assert nx == cls.nx
 
-        thetas = np.expand_dims(x[:, :, 0], axis=-1)
-        omegas = np.expand_dims(x[:, :, 1], axis=-1)
-        sin_theta = np.sin(thetas)
-        cos_theta = np.cos(thetas)
+    #     thetas = np.expand_dims(x[:, :, 0], axis=-1)
+    #     omegas = np.expand_dims(x[:, :, 1], axis=-1)
+    #     sin_theta = np.sin(thetas)
+    #     cos_theta = np.cos(thetas)
 
-        observables = np.concatenate(
-            [
-                thetas,
-                omegas,
-                # np.ones_like(thetas),
-                sin_theta,
-                cos_theta,
-                sin_theta * omegas,
-                cos_theta * omegas,
-                sin_theta * omegas ** 2,
-                cos_theta * omegas ** 2
-            ],
-            axis=-1)
+    #     observables = np.concatenate(
+    #         [
+    #             thetas,
+    #             omegas,
+    #             # np.ones_like(thetas),
+    #             sin_theta,
+    #             cos_theta,
+    #             sin_theta * omegas,
+    #             cos_theta * omegas,
+    #             sin_theta * omegas ** 2,
+    #             cos_theta * omegas ** 2
+    #         ],
+    #         axis=-1)
 
-        assert observables.shape == (N, H, cls.nz)
+    #     assert observables.shape == (N, H, cls.nz)
 
-        return observables.squeeze()
+    #     return observables.squeeze()
 
     def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         is_batch = len(x.shape) == 2
@@ -199,12 +201,15 @@ class Pendulum(DynamicalSystem):
         theta, theta_dot = x[:, 0, None], x[:, 1, None]  # Extract state variables
 
         # Compute angular acceleration
-        theta_ddot = (-self.params.g / self.params.l) * np.sin(theta) + (u / (self.params.m * self.params.l ** 2))
+        theta_ddot = (-self.params.g / self.params.l * np.sin(theta) - self.params.b /
+                      (self.params.m * self.params.l ** 2) * theta_dot + u / (self.params.m * self.params.l ** 2))
+
+        xdot = np.column_stack([theta_dot, theta_ddot])
 
         if is_batch:
-            return np.column_stack([theta_dot, theta_ddot])
+            return xdot
         else:
-            return np.squeeze(np.column_stack([theta_dot, theta_ddot], axis=0))  # [theta_dot, theta_ddot]
+            return np.squeeze(xdot, axis=0)  # [theta_dot, theta_ddot]
 
     class PlotElement(PlotElement):
         def __init__(self, env: PlotEnvironment, sys: "Pendulum", rod_color='black') -> None:
