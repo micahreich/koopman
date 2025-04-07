@@ -9,7 +9,7 @@ import matplotlib.ticker as ticker
 import numpy as np
 import torch
 from torch import nn
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -88,6 +88,7 @@ def train(model: KoopmanAutoencoder,
     # }])
 
     # scheduler = CosineAnnealingLR(optimizer, T_max=n_epochs // 4, eta_min=1e-6)
+    scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
 
     # Test forward pass of the model and loss computation, backprop call
     _, _loss_by_parts = test_forward_pass(model, dataloader, device)
@@ -147,7 +148,7 @@ def train(model: KoopmanAutoencoder,
                 for k, v in _loss_parts.items():
                     loss_by_parts_history[k].append(v.item())
 
-            # scheduler.step()
+            scheduler.step()
             epoch_loss /= len(dataloader)
 
             with torch.no_grad():

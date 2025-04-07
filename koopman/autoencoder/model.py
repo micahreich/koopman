@@ -100,6 +100,8 @@ class KoopmanAutoencoder(nn.Module):
         for i in range(nu):
             weight_init[params_init](self.Cs[i, :, :], **params_init_args)
 
+        self.d = nn.Parameter(torch.zeros((nz, 1)))
+
         self.P = torch.zeros((nx, nz))
         self.P[:, :nx] = torch.eye(nx)
 
@@ -121,7 +123,7 @@ class KoopmanAutoencoder(nn.Module):
 
         self.param_groups = {
             'observables': self.encoder.parameters(),
-            'dynamics': [self.A, self.B, self.Cs],
+            'dynamics': [self.A, self.B, self.Cs, self.d],
         }
 
     def flatten_batch(self, x_batch: torch.Tensor) -> torch.Tensor:
@@ -165,33 +167,33 @@ class KoopmanAutoencoder(nn.Module):
         z0, z_horizon = zs
 
         loss_pred = 0.0
+        loss_bilinear = 0.0
         loss_l1 = 0.0
 
         # (2) Ensure that phi(x_{t+j+1}) = K z_{t+j} + B u_{t+j} + (sum_i C_i u_{t+j}) * z_{t+j} for j = 0, ..., H-1
         z_jm1 = z0
         u_jm1 = u0
 
-        state_pred_errors = torch.zeros((self.H, ), device=x0.device)
+        x_pred_errors = torch.zeros((self.H, ), device=x0.device)
+        z_pred_errors = torch.zeros((self.H, ), device=x0.device)
 
         for j in range(0, self.H):
             z_j_from_rollout = self.predict_z_next(z_jm1, u_jm1)
+            z_j_gt = z_horizon[:, j, :]
 
             x_j_from_rollout = self.project(z_j_from_rollout)
             x_j_gt = x_horizon[:, j, :]
-            # x_j_from_encoding = self.project(z_horizon[:, j, :])
 
-            # z_j_error = z_j_from_encoding - z_j_from_rollout
-            # n1 = torch.linalg.vector_norm(z_j_error, ord=2, dim=-1)
-
-            # loss_pred += self.horizon_loss_weights[j] * torch.mean(n1)
-            state_pred_errors[j] = F.mse_loss(x_j_from_rollout, x_j_gt, reduction='mean')
+            x_pred_errors[j] = F.mse_loss(x_j_from_rollout, x_j_gt, reduction='mean')
+            z_pred_errors[j] = F.mse_loss(z_j_from_rollout, z_j_gt, reduction='mean')
 
             z_jm1 = z_j_from_rollout
 
             if j < self.H - 1:
                 u_jm1 = u_horizon[:, j, :]
 
-        loss_pred = torch.linalg.norm(state_pred_errors, ord=torch.inf)
+        loss_pred = torch.linalg.norm(x_pred_errors, ord=torch.inf)
+        loss_bilinear = torch.linalg.norm(z_pred_errors, ord=torch.inf)
 
         # (2) Encourage sparsity in the matrix K to not have redundant information/reduce overfitting
         loss_l1 = torch.linalg.matrix_norm(self.A, ord=1)
@@ -204,18 +206,21 @@ class KoopmanAutoencoder(nn.Module):
 
         loss_dict = {
             'loss_pred': self.horizon_loss_weight * loss_pred,
+            'loss_bilinear': self.horizon_loss_weight * loss_bilinear,
             'loss_l1': self.L1_reg_weight * loss_l1,
             'loss_jac': self.jacobian_reg_weight * loss_jac_reg,
         }
 
-        return loss_dict['loss_pred'] + loss_dict['loss_l1'] + loss_dict['loss_jac'], loss_dict
+        return loss_dict['loss_pred'] + loss_dict['loss_bilinear'] + loss_dict['loss_l1'] + loss_dict[
+            'loss_jac'], loss_dict
 
     def predict_z_next(self, z_jm1: torch.Tensor, u_jm1: torch.Tensor) -> torch.Tensor:
         # Use bilinear form of Koopman dynamcis:
         #   z_{t+1} = A z_t + B u_t + (sum_i C_i u_t) * z_t
 
         C_i_u_i_sum = torch.einsum('b j, j m n -> b m n', u_jm1, self.Cs)
-        z_j_from_rollout = z_jm1 @ self.A.T + u_jm1 @ self.B.T + torch.einsum('b m n, b n -> b m', C_i_u_i_sum, z_jm1)
+        z_j_from_rollout = z_jm1 @ self.A.T + u_jm1 @ self.B.T + torch.einsum('b m n, b n -> b m', C_i_u_i_sum,
+                                                                              z_jm1) + self.d.T
 
         return z_j_from_rollout
 
