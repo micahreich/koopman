@@ -81,7 +81,7 @@ if __name__ == "__main__":
         nx=NonlinearAttractor2D.nx,
         nu=NonlinearAttractor2D.nu,
         nz=3,
-        H=pred_horizon,
+        pred_horizon=pred_horizon,
         params_init='eye',
         hidden_dims=[32, 32],
         activation=nn.Mish,

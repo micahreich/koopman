@@ -86,6 +86,7 @@ class KoopmanDataset(Dataset):
         self.x_hist = x_hist.float()
         self.u_hist = u_hist.float()
         self.ts = ts.float()
+        self.dt = ts[1] - ts[0]
 
         assert len(self.x_hist.shape) == len(self.u_hist.shape) and len(self.x_hist.shape) in [2, 3], \
             "x_hist and uhist must have the same number of dimensions and be either 2 or 3 dimensional"

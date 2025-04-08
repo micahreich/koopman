@@ -72,10 +72,11 @@ class KoopmanAutoencoder(nn.Module):
                  nx: int,
                  nu: int,
                  nz: int,
-                 H: int,
+                 pred_horizon: int,
                  params_init: str = 'eye',
                  params_init_args: dict = {},
-                 horizon_loss_weight: float = 1.0,
+                 horizon_loss_weight_x: float = 1.0,
+                 horizon_loss_weight_z: float = 1.0,
                  L1_reg_weight: float = 1.0,
                  jacobian_reg_weight: float = 0.0,
                  hidden_dims: List[int] = [64],
@@ -88,17 +89,20 @@ class KoopmanAutoencoder(nn.Module):
         self.nx = nx  # Dimension of the state space
         self.nu = nu  # Dimension of the control space
         self.nz = nz  # Dimension of the latent space
-        self.H = H  # Prediction horizon
+        self.pred_horizon = pred_horizon  # Prediction horizon
 
         self.A = nn.Parameter(torch.empty((nz, nz)))
         weight_init[params_init](self.A, **params_init_args)
 
-        self.B = nn.Parameter(torch.empty((nz, nu)))
-        weight_init[params_init](self.B, **params_init_args)
+        self.B = nn.Parameter(torch.zeros((nz, nu)))
+        # torch.nn.init.trunc_normal_(self.B, std=0.01, a=-1.0, b=1.0)
+        # init.xavier_uniform_(self.B)
 
-        self.Cs = nn.Parameter(torch.empty((nu, nz, nz)))
-        for i in range(nu):
-            weight_init[params_init](self.Cs[i, :, :], **params_init_args)
+        self.Cs = nn.Parameter(torch.zeros((nu, nz, nz)))
+        # torch.nn.init.trunc_normal_(self.Cs, std=0.01, a=-1.0, b=1.0)
+        # init.xavier_uniform_(self.Cs)
+
+        #     weight_init[params_init](self.Cs[i, :, :], **params_init_args)
 
         self.d = nn.Parameter(torch.zeros((nz, 1)))
 
@@ -106,12 +110,13 @@ class KoopmanAutoencoder(nn.Module):
         self.P[:, :nx] = torch.eye(nx)
 
         self.gamma = 1.0
-        self.horizon_loss_weights = self.gamma ** torch.arange(0, self.H)
+        self.horizon_loss_weights = self.gamma ** torch.arange(0, self.pred_horizon)
 
         # Weight different parts of the combined loss differently
-        loss_weights_sum = horizon_loss_weight + L1_reg_weight + jacobian_reg_weight
+        loss_weights_sum = horizon_loss_weight_x + horizon_loss_weight_z + L1_reg_weight + jacobian_reg_weight
 
-        self.horizon_loss_weight = horizon_loss_weight / loss_weights_sum
+        self.horizon_loss_weight_x = horizon_loss_weight_x / loss_weights_sum
+        self.horizon_loss_weight_z = horizon_loss_weight_z / loss_weights_sum
         self.L1_reg_weight = L1_reg_weight / loss_weights_sum
         self.jacobian_reg_weight = jacobian_reg_weight / loss_weights_sum
 
@@ -174,26 +179,28 @@ class KoopmanAutoencoder(nn.Module):
         z_jm1 = z0
         u_jm1 = u0
 
-        x_pred_errors = torch.zeros((self.H, ), device=x0.device)
-        z_pred_errors = torch.zeros((self.H, ), device=x0.device)
+        # x_pred_errors = torch.zeros((self.H, ), device=x0.device)
+        # z_pred_errors = torch.zeros((self.H, ), device=x0.device)
 
-        for j in range(0, self.H):
+        for j in range(0, self.pred_horizon):
             z_j_from_rollout = self.predict_z_next(z_jm1, u_jm1)
             z_j_gt = z_horizon[:, j, :]
 
             x_j_from_rollout = self.project(z_j_from_rollout)
             x_j_gt = x_horizon[:, j, :]
 
-            x_pred_errors[j] = F.mse_loss(x_j_from_rollout, x_j_gt, reduction='mean')
-            z_pred_errors[j] = F.mse_loss(z_j_from_rollout, z_j_gt, reduction='mean')
+            loss_pred += F.mse_loss(x_j_from_rollout, x_j_gt, reduction='mean')
+            loss_bilinear += F.mse_loss(z_j_from_rollout, z_j_gt, reduction='mean')
 
             z_jm1 = z_j_from_rollout
 
-            if j < self.H - 1:
+            if j < self.pred_horizon - 1:
                 u_jm1 = u_horizon[:, j, :]
 
-        loss_pred = torch.linalg.norm(x_pred_errors, ord=torch.inf)
-        loss_bilinear = torch.linalg.norm(z_pred_errors, ord=torch.inf)
+        # loss_pred = torch.linalg.norm(x_pred_errors, ord=torch.inf)
+        # loss_bilinear = torch.linalg.norm(z_pred_errors, ord=torch.inf)
+        loss_pred *= 1 / self.pred_horizon
+        loss_bilinear *= 1 / self.pred_horizon
 
         # (2) Encourage sparsity in the matrix K to not have redundant information/reduce overfitting
         loss_l1 = torch.linalg.matrix_norm(self.A, ord=1)
@@ -205,8 +212,8 @@ class KoopmanAutoencoder(nn.Module):
             loss_jac_reg = self.jacobian_reg_weight * (Jx_norm_mean + Ju_norm_mean)
 
         loss_dict = {
-            'loss_pred': self.horizon_loss_weight * loss_pred,
-            'loss_bilinear': self.horizon_loss_weight * loss_bilinear,
+            'loss_pred': self.horizon_loss_weight_x * loss_pred,
+            'loss_bilinear': self.horizon_loss_weight_z * loss_bilinear,
             'loss_l1': self.L1_reg_weight * loss_l1,
             'loss_jac': self.jacobian_reg_weight * loss_jac_reg,
         }

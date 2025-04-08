@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 from typing import Union
 
 import einops
@@ -52,7 +53,7 @@ def evaluate(model: KoopmanAutoencoder, dataset: KoopmanDataset, epoch_idx: Unio
     for i in range(Pendulum.nu):
         color = colors[i + Pendulum.nx]
 
-        ax[1].plot(ts[:-1], uhist[:, i], color=color, linestyle='--', label=rf'$u_{i}$')
+        ax[1].plot(ts[:-1], uhist[:, i], color='black', label=rf'$u_{i}$')
 
     ax[0].legend()
     ax[1].legend()
@@ -69,8 +70,28 @@ def evaluate(model: KoopmanAutoencoder, dataset: KoopmanDataset, epoch_idx: Unio
     return xhist, uhist, xhist_pred
 
 
+pred_horizon = 50
+model = KoopmanAutoencoder(
+    nx=Pendulum.nx,
+    nu=Pendulum.nu,
+    nz=32 + 2,
+    pred_horizon=pred_horizon,
+    params_init='eye',
+    hidden_dims=[128, 128, 128],
+    activation=nn.Tanh,
+    use_layernorm=False,
+    horizon_loss_weight_x=2.0,
+    horizon_loss_weight_z=0.5,
+    L1_reg_weight=0.1,
+    jacobian_reg_weight=0.0,
+)
+
 if __name__ == "__main__":
-    pred_horizon = 50
+    # Remove the directory if it exists, then recreate it
+    eval_plots_dir = os.path.join(SCRIPT_DIR, "eval_plots")
+    if os.path.exists(eval_plots_dir):
+        shutil.rmtree(eval_plots_dir)
+    os.makedirs(eval_plots_dir, exist_ok=True)
 
     data = torch.load(os.path.join(SCRIPT_DIR, "pendulum_data.pt"), weights_only=False)
     ts = data["ts"]
@@ -79,26 +100,6 @@ if __name__ == "__main__":
     dt = data["dt"]
     stats = data["stats"]
 
-    print(f"Dataset info...")
-    print(f"\txhist shape: {xhist.shape}")
-    print(f"\tuhist shape: {uhist.shape}")
-    print(f"\ttime steps: {ts.shape}")
-    print(f"\tdt: {dt}")
-
     dataset = KoopmanDataset(xhist, uhist, ts, stats, pred_horizon, normalize=True)
 
-    model = KoopmanAutoencoder(
-        nx=Pendulum.nx,
-        nu=Pendulum.nu,
-        nz=32,
-        H=pred_horizon,
-        params_init='eye',
-        hidden_dims=[128, 128, 128],
-        activation=nn.Mish,
-        use_layernorm=False,
-        horizon_loss_weight=10.0,
-        L1_reg_weight=0.0,
-        jacobian_reg_weight=0.0,
-    )
-
-    train(model, dataset, n_epochs=100, batch_size=128, learning_rate=1e-3, evaluate=evaluate, save_dir=SCRIPT_DIR)
+    train(model, dataset, n_epochs=100, batch_size=512, learning_rate=1e-4, evaluate=evaluate, save_dir=SCRIPT_DIR)

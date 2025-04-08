@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 from typing import Callable, Optional
 
 import einops
@@ -45,7 +46,6 @@ def simulate_with_observables(model: KoopmanAutoencoder, x0: torch.Tensor, uhist
 
 def test_forward_pass(model: KoopmanAutoencoder, dataloader: DataLoader, device):
     batch = next(iter(dataloader))
-    # x0, u0, x_horizon, u_horizon = map(lambda x: x.to(device).requires_grad_(True), batch)
     x0, u0, x_horizon, u_horizon = map(lambda x: x.to(device), batch)
     batch_size = x0.shape[0]
 
@@ -63,6 +63,16 @@ def test_forward_pass(model: KoopmanAutoencoder, dataloader: DataLoader, device)
     return loss_total, _loss_by_parts
 
 
+# def generate_curriculum(ph_max: int, ph_min: int, n_epochs):
+#     warmup_ratio = 0.2
+
+#     n_warmup_epochs = int(warmup_ratio * n_epochs)
+#     y = np.linspace(ph_min, ph_max, n_epochs - n_warmup_epochs, dtype=int)
+
+#     ph_schedule = np.concatenate((np.full(n_warmup_epochs, ph_min), y))
+#     return ph_schedule
+
+
 def train(model: KoopmanAutoencoder,
           dataset: KoopmanDataset,
           n_epochs: int,
@@ -70,8 +80,6 @@ def train(model: KoopmanAutoencoder,
           learning_rate: float,
           evaluate: Optional[Callable] = None,
           save_dir: Optional[str] = ""):
-    os.makedirs(os.path.join(save_dir, "eval_plots"), exist_ok=True)
-
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -84,26 +92,34 @@ def train(model: KoopmanAutoencoder,
     #     'lr': learning_rate
     # }, {
     #     'params': model.param_groups['dynamics'],
-    #     'lr': learning_rate / 2.0
+    #     'lr': learning_rate
     # }])
 
     # scheduler = CosineAnnealingLR(optimizer, T_max=n_epochs // 4, eta_min=1e-6)
-    scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
+    scheduler = StepLR(optimizer, step_size=15, gamma=0.5)
 
     # Test forward pass of the model and loss computation, backprop call
     _, _loss_by_parts = test_forward_pass(model, dataloader, device)
     optimizer.zero_grad()
 
     # Begin training
-    print("Beginning training... info:")
+    print("Beginning training...")
+    print(f"    Dataset info:")
+    print(f"\txhist shape: {dataset.x_hist.shape}")
+    print(f"\tuhist shape: {dataset.u_hist.shape}")
+    print(f"\tdt: {dataset.dt}")
+    print(f"    Training info:")
     print(f"\tBatch size: {batch_size}")
     print(f"\tLearning rate: {learning_rate}")
     print(f"\tEpochs: {n_epochs}")
     print(f"\tDevice: {device}")
     print(f"\tNum params: {sum(p.numel() for p in model.parameters())}")
+    print(f"\tPrediction horizon max: {model.pred_horizon}")
 
     loss_history = []
     loss_by_parts_history = {k: [] for k in _loss_by_parts.keys()}
+
+    # pred_horizon_schedule = generate_curriculum(ph_max=pred_horizon_max, ph_min=pred_horizon_min, n_epochs=n_epochs)
 
     if evaluate is not None:
         with torch.no_grad():
@@ -148,7 +164,7 @@ def train(model: KoopmanAutoencoder,
                 for k, v in _loss_parts.items():
                     loss_by_parts_history[k].append(v.item())
 
-            scheduler.step()
+            # scheduler.step()
             epoch_loss /= len(dataloader)
 
             with torch.no_grad():
@@ -169,8 +185,8 @@ def train(model: KoopmanAutoencoder,
 
     ax.plot(xs, loss_history, label="total", color='black', linewidth=0.5)
 
-    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
-    ax.xaxis.set_minor_locator(ticker.MultipleLocator(0.1))
+    ax.xaxis.set_major_locator(ticker.MultipleLocator((epoch + 1) // 5))
+    ax.xaxis.set_minor_locator(ticker.MultipleLocator(1))
 
     ax.set_title("Loss over epochs")
     ax.set_xlabel("Epoch")
@@ -179,3 +195,8 @@ def train(model: KoopmanAutoencoder,
     ax.legend()
     plt.savefig(os.path.join(save_dir, "loss_plot.png"))
     plt.close(fig)
+
+
+# if __name__ == "__main__":
+#     phs = generate_curriculum(ph_max=30, ph_min=10, n_epochs=101)
+#     print("Prediction horizons:", phs)

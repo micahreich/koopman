@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 from typing import Union
 
 import einops
@@ -70,6 +71,12 @@ def evaluate(model: KoopmanAutoencoder, dataset: KoopmanDataset, epoch_idx: Unio
 
 
 if __name__ == "__main__":
+    # Remove the directory if it exists, then recreate it
+    eval_plots_dir = os.path.join(SCRIPT_DIR, "eval_plots")
+    if os.path.exists(eval_plots_dir):
+        shutil.rmtree(eval_plots_dir)
+    os.makedirs(eval_plots_dir, exist_ok=True)
+
     pred_horizon = 50
 
     data = torch.load(os.path.join(SCRIPT_DIR, "pendulum_data.pt"), weights_only=False)
@@ -78,27 +85,28 @@ if __name__ == "__main__":
     uhist = data["uhist"]
     dt = data["dt"]
     stats = data["stats"]
-
-    print(f"Dataset info...")
-    print(f"\txhist shape: {xhist.shape}")
-    print(f"\tuhist shape: {uhist.shape}")
-    print(f"\ttime steps: {ts.shape}")
-    print(f"\tdt: {dt}")
-
-    dataset = KoopmanDataset(xhist, uhist, ts, stats, pred_horizon, normalize=True)
+    dataset = KoopmanDataset(xhist, uhist, ts, stats, normalize=True)
 
     model = KoopmanAutoencoder(
         nx=Pendulum.nx,
         nu=Pendulum.nu,
         nz=32,
-        H=pred_horizon,
         params_init='eye',
         hidden_dims=[128, 128, 128],
         activation=nn.Mish,
         use_layernorm=False,
-        horizon_loss_weight=10.0,
+        horizon_loss_weight_x=10.0,
+        horizon_loss_weight_z=1.0,
         L1_reg_weight=0.0,
         jacobian_reg_weight=0.0,
     )
 
-    train(model, dataset, n_epochs=100, batch_size=128, learning_rate=1e-3, evaluate=evaluate, save_dir=SCRIPT_DIR)
+    train(model,
+          dataset,
+          pred_horizon_max=64,
+          n_epochs=100,
+          iter_per_epoch=500,
+          batch_size=128,
+          learning_rate=1e-3,
+          evaluate=evaluate,
+          save_dir=SCRIPT_DIR)

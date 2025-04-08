@@ -15,20 +15,6 @@ pendulum = Pendulum(Pendulum.Params(m=1, l=1, g=9.81, b=0.5))
 
 
 def generate_gaussian_smooth_controls(T, N=1, nu=1, std=1.0, sigma_range=[0.5, 2.0]):
-    """
-    Generate N smooth random control trajectories using a Gaussian filter.
-
-    Parameters:
-        T (int): Number of timesteps
-        nu (int): Control dimension
-        N (int): Number of trajectories
-        std (float): Amplitude of noise
-        sigma (float): Std of Gaussian kernel (controls smoothness)
-        scale (float): Final scaling factor
-
-    Returns:
-        u (ndarray): Smooth controls, shape (N, T, nu)
-    """
     u_raw = np.random.randn(N, T, nu) * std
     u_smooth = np.zeros_like(u_raw)
 
@@ -42,18 +28,44 @@ def generate_gaussian_smooth_controls(T, N=1, nu=1, std=1.0, sigma_range=[0.5, 2
     return u_smooth
 
 
+def generate_decaying_sinusoid_controls(T, N, nu=1):
+    freq_range = (1.0, 5.0)
+    decay_range = (0.1, 10.0)
+    amp_range = (1.0, 10.0)
+    phase_range = (0, 2 * np.pi)
+
+    t = np.linspace(0, 1, T)  # time over 1 second
+
+    # Random parameters per sample per channel
+    freqs = np.random.uniform(*freq_range, size=(N, nu))
+    decays = np.random.uniform(*decay_range, size=(N, nu))
+    amps = np.random.uniform(*amp_range, size=(N, nu))
+    phases = np.random.uniform(*phase_range, size=(N, nu))
+
+    # Shape broadcasting to (N, T, nu)
+    t = t[None, :, None]  # (1, T, 1)
+
+    freqs = freqs[:, None, :]  # (N, 1, nu)
+    decays = decays[:, None, :]
+    amps = amps[:, None, :]
+    phases = phases[:, None, :]
+
+    signals = amps * np.exp(-decays * t) * np.sin(2 * np.pi * freqs * t + phases)
+    return signals
+
+
 if __name__ == "__main__":
-    N = 5_000
+    N = 1_000
 
     theta_0 = np.random.uniform(-np.pi, np.pi, (N, 1))
     omega_0 = np.random.uniform(-5, 5, (N, 1))
     x0 = np.hstack((theta_0, omega_0))
 
     tf = 8.0
-    dt = 0.1
+    dt = 0.05
     T = int(tf / dt)
 
-    controls = generate_gaussian_smooth_controls(T=T, N=N, nu=Pendulum.nu, std=10.0, sigma_range=(2.0, 10.0))
+    controls = generate_decaying_sinusoid_controls(T=T, N=N, nu=Pendulum.nu)
 
     def u(t, x):
         # Generate a smooth control trajectory

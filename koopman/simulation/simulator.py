@@ -1,5 +1,5 @@
 import time
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,20 +22,22 @@ def rk4_step(f: Callable, x: np.ndarray, u: np.ndarray, dt: float) -> np.ndarray
 def simulate_batch(sys: DynamicalSystem,
                    tf: float,
                    dt: float,
-                   u: Callable,
+                   u: Union[Callable, np.ndarray],
                    x0: np.ndarray,
                    obs_fn: Callable = lambda i, x_hist: x_hist[:, i, :],
                    pbar=True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     N, nx = x0.shape
 
     ts = np.arange(0, tf + dt, dt)
-
     x_hist = np.zeros((N, len(ts), nx))
-    u_hist = np.zeros((N, len(ts) - 1, sys.nu))
+
+    if isinstance(u, np.ndarray):
+        u_hist = u
+    else:
+        assert u(0.0, obs_fn(0, x_hist)).shape == (N, sys.nu), "Control function must return an array of shape (N, nu)"
+        u_hist = np.zeros((N, len(ts) - 1, sys.nu))
 
     assert nx == sys.nx, "Initial states must have shape (N, nx)"
-    assert u(0.0, obs_fn(0, x_hist)).shape == (N, sys.nu), "Control function must return an array of shape (N, nu)"
-
     x_hist[:, 0, :] = x0
 
     if pbar:
@@ -45,13 +47,15 @@ def simulate_batch(sys: DynamicalSystem,
 
     for i, t in enumerate(iterator):
         observation = obs_fn(i, x_hist)
-        u_hist[:, i, :] = u(t, observation)
+
+        if not isinstance(u, np.ndarray):
+            u_hist[:, i, :] = u(t, observation)
 
         # Run one RK4 integration step
         x_hist[:, i + 1, :] = rk4_step(sys.dynamics, x_hist[:, i, :], u_hist[:, i, :], dt)
 
-        # Project state if necessary to keep it in the manifold
-        x_hist[:, i + 1, :] = sys.project_state(x_hist[:, i + 1, :])
+        # # Project state if necessary to keep it in the manifold
+        # x_hist[:, i + 1, :] = sys.project_state(x_hist[:, i + 1, :])
 
     return ts, x_hist, u_hist
 
@@ -59,14 +63,17 @@ def simulate_batch(sys: DynamicalSystem,
 def simulate(sys: DynamicalSystem,
              tf: float,
              dt: float,
-             u: Callable,
+             u: Union[Callable, np.ndarray],
              x0: np.ndarray,
              log: bool = True,
              obs_fn: Callable = lambda i, x_hist: x_hist[i, :],
              pbar=True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    u_modified = lambda t, x: np.expand_dims(u(t, np.squeeze(x, axis=0)), axis=0)
-    obs_fn_modified = lambda i, x_hist: np.expand_dims(obs_fn(i, np.squeeze(x_hist, axis=0)), axis=0)
+    if isinstance(u, np.ndarray):
+        u_modified = np.expand_dims(u, axis=0)
+    else:
+        u_modified = lambda t, x: np.expand_dims(u(t, np.squeeze(x, axis=0)), axis=0)
 
+    obs_fn_modified = lambda i, x_hist: np.expand_dims(obs_fn(i, np.squeeze(x_hist, axis=0)), axis=0)
     ts, x_hist, u_hist = simulate_batch(sys, tf, dt, u_modified, np.expand_dims(x0, axis=0), obs_fn_modified, pbar)
 
     if log:

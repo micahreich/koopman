@@ -251,17 +251,17 @@ class CartPole(DynamicalSystem):
     def __init__(self, params: Params) -> None:
         super().__init__("CartPole", params)
 
-    def project_state(self, x: np.ndarray) -> np.ndarray:
-        # Project the state to a suitable range if necessary
-        # For CartPole, we might want to wrap the angle theta to be within [-pi, pi]
-        if len(x.shape) == 2:
-            theta = x[:, 1]
-            x[:, 1] = np.remainder(theta, 2 * np.pi)
-        else:
-            theta = x[1]
-            x[1] = theta % (2 * np.pi)
+    # def project_state(self, x: np.ndarray) -> np.ndarray:
+    #     # Project the state to a suitable range if necessary
+    #     # For CartPole, we might want to wrap the angle theta to be within [-pi, pi]
+    #     if len(x.shape) == 2:
+    #         theta = x[:, 1]
+    #         x[:, 1] = np.remainder(theta, 2 * np.pi)
+    #     else:
+    #         theta = x[1]
+    #         x[1] = theta % (2 * np.pi)
 
-        return x
+    #     return x
 
     def batch_dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         N1, nx = x.shape
