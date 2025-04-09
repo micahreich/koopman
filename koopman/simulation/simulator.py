@@ -1,4 +1,5 @@
 import time
+from fractions import Fraction
 from typing import Any, Callable, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -28,7 +29,11 @@ def simulate_batch(sys: DynamicalSystem,
                    pbar=True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     N, nx = x0.shape
 
-    ts = np.arange(0, tf + dt, dt)
+    dt = Fraction.from_float(dt).limit_denominator()
+    tf = Fraction.from_float(tf).limit_denominator()
+    T = tf / dt
+
+    ts = dt * np.arange(0, T + 1, dtype=np.int32)
     x_hist = np.zeros((N, len(ts), nx))
 
     if isinstance(u, np.ndarray):
@@ -45,7 +50,8 @@ def simulate_batch(sys: DynamicalSystem,
     else:
         iterator = ts[:-1]
 
-    for i, t in enumerate(iterator):
+    for i, t_frac in enumerate(iterator):
+        t = float(t_frac)
         observation = obs_fn(i, x_hist)
 
         if not isinstance(u, np.ndarray):

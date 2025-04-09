@@ -97,8 +97,6 @@ class NonlinearAttractor2D(DynamicalSystem):
     nu = 1
 
     def __init__(self, params: Params) -> None:
-        assert params.mu > 0 and params.lam > 0
-
         super().__init__("NonlinearAttractor2D", params)
 
     def dynamics(self, x, u):
@@ -113,10 +111,39 @@ class NonlinearAttractor2D(DynamicalSystem):
         x1_dot = -self.params.mu * x1
         x2_dot = -self.params.lam * (x2 - x1 ** 2) + u
 
+        out = np.column_stack([x1_dot, x2_dot])
+
         if is_batch:
-            return np.column_stack([x1_dot, x2_dot])
+            return out
         else:
-            return np.squeeze(np.column_stack([x1_dot, x2_dot]), axis=0)
+            return np.squeeze(out, axis=0)
+
+
+class VanDerPolOscillator(DynamicalSystem):
+    nx = 2
+    nu = 1
+
+    def __init__(self) -> None:
+        super().__init__("VanDerPolOscillator", None)
+
+    def dynamics(self, x, u):
+        is_batch = len(x.shape) == 2
+
+        if not is_batch:
+            x = np.expand_dims(x, axis=0)
+
+        x1 = x[:, 0, None]
+        x2 = x[:, 1, None]
+
+        x1_dot = 2.0 * x2
+        x2_dot = -0.8 * x1 + 2.0 * x2 - 10.0 * x1 ** 2 * x2 + u
+
+        out = np.column_stack([x1_dot, x2_dot])
+
+        if is_batch:
+            return out
+        else:
+            return np.squeeze(out, axis=0)
 
 
 class Pendulum(DynamicalSystem):
@@ -130,60 +157,8 @@ class Pendulum(DynamicalSystem):
     nx = 2  # [theta, theta_dot]
     nu = 1  # Torque input
 
-    # nz = 8  # Number of Koopman observables
-
     def __init__(self, params: Params) -> None:
         super().__init__("Pendulum", params)
-
-    # def project_state(self, x: np.ndarray) -> np.ndarray:
-    #     if len(x.shape) == 2:
-    #         x[:, 0] = angle_wrap(x[:, 0], mode="0:2pi")
-    #     else:
-    #         x[0] = angle_wrap(x[0], mode="0:2pi")
-    #     return x
-
-    # def interp_states(self, t, x0, x1):
-    #     linterp_x = super().interp_states(t, x0, x1)
-
-    #     s1, s2 = SO2(x0[0]), SO2(x1[0])
-    #     theta_interp = s1.interp(s2, t)
-
-    #     linterp_x[0] = theta_interp.theta(unit='rad')
-    #     return linterp_x
-
-    # @classmethod
-    # def koopman_observables(cls, x):
-    #     if len(x.shape) == 1:
-    #         x = x.reshape((1, 1, x.shape[0]))
-    #     elif len(x.shape) == 2:
-    #         x = x.reshape((1, x.shape[0], x.shape[1]))
-
-    #     N, H, nx = x.shape
-
-    #     assert nx == cls.nx
-
-    #     thetas = np.expand_dims(x[:, :, 0], axis=-1)
-    #     omegas = np.expand_dims(x[:, :, 1], axis=-1)
-    #     sin_theta = np.sin(thetas)
-    #     cos_theta = np.cos(thetas)
-
-    #     observables = np.concatenate(
-    #         [
-    #             thetas,
-    #             omegas,
-    #             # np.ones_like(thetas),
-    #             sin_theta,
-    #             cos_theta,
-    #             sin_theta * omegas,
-    #             cos_theta * omegas,
-    #             sin_theta * omegas ** 2,
-    #             cos_theta * omegas ** 2
-    #         ],
-    #         axis=-1)
-
-    #     assert observables.shape == (N, H, cls.nz)
-
-    #     return observables.squeeze()
 
     def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
         is_batch = len(x.shape) == 2

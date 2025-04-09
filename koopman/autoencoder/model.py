@@ -179,9 +179,6 @@ class KoopmanAutoencoder(nn.Module):
         z_jm1 = z0
         u_jm1 = u0
 
-        # x_pred_errors = torch.zeros((self.H, ), device=x0.device)
-        # z_pred_errors = torch.zeros((self.H, ), device=x0.device)
-
         for j in range(0, self.pred_horizon):
             z_j_from_rollout = self.predict_z_next(z_jm1, u_jm1)
             z_j_gt = z_horizon[:, j, :]
@@ -197,25 +194,23 @@ class KoopmanAutoencoder(nn.Module):
             if j < self.pred_horizon - 1:
                 u_jm1 = u_horizon[:, j, :]
 
-        # loss_pred = torch.linalg.norm(x_pred_errors, ord=torch.inf)
-        # loss_bilinear = torch.linalg.norm(z_pred_errors, ord=torch.inf)
         loss_pred *= 1 / self.pred_horizon
         loss_bilinear *= 1 / self.pred_horizon
 
         # (2) Encourage sparsity in the matrix K to not have redundant information/reduce overfitting
         loss_l1 = torch.linalg.matrix_norm(self.A, ord=1)
 
-        # (3) Encourage the dynamics Jacobian to have small Frobenius norm
-        loss_jac_reg = torch.tensor(0.0, device=x0.device)
-        if self.jacobian_reg_weight > 0:
-            Jx_norm_mean, Ju_norm_mean = self._dynamics_jacobian_norm(x0, u0, z0)
-            loss_jac_reg = self.jacobian_reg_weight * (Jx_norm_mean + Ju_norm_mean)
+        # # (3) Encourage the dynamics Jacobian to have small Frobenius norm
+        # loss_jac_reg = torch.tensor(0.0, device=x0.device)
+        # if self.jacobian_reg_weight > 0:
+        #     Jx_norm_mean, Ju_norm_mean = self._dynamics_jacobian_norm(x0, u0, z0)
+        #     loss_jac_reg = self.jacobian_reg_weight * (Jx_norm_mean + Ju_norm_mean)
 
         loss_dict = {
             'loss_pred': self.horizon_loss_weight_x * loss_pred,
             'loss_bilinear': self.horizon_loss_weight_z * loss_bilinear,
             'loss_l1': self.L1_reg_weight * loss_l1,
-            'loss_jac': self.jacobian_reg_weight * loss_jac_reg,
+            # 'loss_jac': self.jacobian_reg_weight * loss_jac_reg,
         }
 
         return loss_dict['loss_pred'] + loss_dict['loss_bilinear'] + loss_dict['loss_l1'] + loss_dict[
