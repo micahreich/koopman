@@ -63,7 +63,7 @@ def simulate_batch(sys: DynamicalSystem,
         # # Project state if necessary to keep it in the manifold
         # x_hist[:, i + 1, :] = sys.project_state(x_hist[:, i + 1, :])
 
-    return ts, x_hist, u_hist
+    return ts.astype(np.float32), x_hist, u_hist
 
 
 def simulate(sys: DynamicalSystem,

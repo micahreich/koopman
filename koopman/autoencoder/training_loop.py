@@ -31,15 +31,19 @@ def simulate_with_observables(model: KoopmanAutoencoder, x0: torch.Tensor, uhist
     xhist_pred = torch.empty(Tm1 + 1, model.nx).to(device)
     zhist = torch.empty(Tm1 + 1, model.nz).to(device)
 
-    z_jm1 = model.forward(x0.unsqueeze(0))
-    xhist_pred[0, :] = torch.squeeze(model.project(z_jm1), dim=0)
-    zhist[0, :] = torch.squeeze(z_jm1, dim=0)
+    print()
+
+    z_jm1 = model.forward(x0)
+    xhist_pred[0, :] = model.project(z_jm1)
+    zhist[0, :] = z_jm1
+
+    A, B, Cs, d = model.get_dynamics()
 
     for j in range(1, Tm1 + 1):
-        z_jm1 = model.predict_z_next(z_jm1, uhist[j - 1, :].unsqueeze(0))
+        z_jm1 = model.predict_z_next(z_jm1, uhist[j - 1, :], A, B, Cs, d)
 
-        xhist_pred[j, :] = torch.squeeze(model.project(z_jm1), dim=0)
-        zhist[j, :] = torch.squeeze(z_jm1, dim=0)
+        xhist_pred[j, :] = model.project(z_jm1)
+        zhist[j, :] = z_jm1
 
     return xhist_pred, zhist
 
@@ -48,16 +52,16 @@ def test_forward_pass(model: KoopmanAutoencoder, dataloader: DataLoader, device)
     batch = next(iter(dataloader))
     x0, u0, x_horizon, u_horizon = map(lambda x: x.to(device), batch)
     batch_size = x0.shape[0]
+    pred_horizon = x_horizon.shape[1]
 
     z0 = model.forward(x0)
     x_horizon_flat = model.flatten_batch(x_horizon)
     z_horizon_flat = model.forward(x_horizon_flat)
     z_horizon = model.unflatten_batch(batch_size, z_horizon_flat)
-    loss_total, _loss_by_parts = model.loss(
-        xs=(x0, x_horizon),
-        us=(u0, u_horizon),
-        zs=(z0, z_horizon),
-    )
+    loss_total, _loss_by_parts = model.loss(xs=(x0, x_horizon),
+                                            us=(u0, u_horizon),
+                                            zs=(z0, z_horizon),
+                                            pred_horizon=pred_horizon)
 
     loss_total.backward()
     return loss_total, _loss_by_parts
@@ -83,6 +87,11 @@ def train(model: KoopmanAutoencoder,
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
+
+    # print(model.Q.device)
+    # print(model.C.device)
+    # print(model.A_continuous.device)
+    # print(model.A.device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -114,7 +123,6 @@ def train(model: KoopmanAutoencoder,
     print(f"\tEpochs: {n_epochs}")
     print(f"\tDevice: {device}")
     print(f"\tNum params: {sum(p.numel() for p in model.parameters())}")
-    print(f"\tPrediction horizon max: {model.pred_horizon}")
 
     loss_history = []
     loss_by_parts_history = {k: [] for k in _loss_by_parts.keys()}
@@ -138,6 +146,7 @@ def train(model: KoopmanAutoencoder,
                 # x0, u0, x_horizon, u_horizon = map(lambda x: x.to(device).requires_grad_(True), batch)
                 x0, u0, x_horizon, u_horizon = map(lambda x: x.to(device), batch)
                 B = x0.shape[0]
+                pred_horizon = x_horizon.shape[1]
 
                 z0 = model.forward(x0)
 
@@ -146,11 +155,10 @@ def train(model: KoopmanAutoencoder,
                 z_horizon = model.unflatten_batch(B, z_horizon_flat)
 
                 # loss_total, _loss_parts = model.loss(xhist_flat, uhist_flat, zhist_flat)
-                loss_total, _loss_parts = model.loss(
-                    xs=(x0, x_horizon),
-                    us=(u0, u_horizon),
-                    zs=(z0, z_horizon),
-                )
+                loss_total, _loss_parts = model.loss(xs=(x0, x_horizon),
+                                                     us=(u0, u_horizon),
+                                                     zs=(z0, z_horizon),
+                                                     pred_horizon=pred_horizon)
 
                 optimizer.zero_grad()
                 loss_total.backward()
