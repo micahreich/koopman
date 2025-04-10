@@ -29,26 +29,27 @@ def simulate_batch(sys: DynamicalSystem,
                    pbar=True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     N, nx = x0.shape
 
-    dt = Fraction.from_float(dt).limit_denominator()
-    tf = Fraction.from_float(tf).limit_denominator()
-    T = tf / dt
+    # Do the timing stuff with fractions to avoid floating point errors
+    dt_frac = Fraction.from_float(dt).limit_denominator()
+    tf_frac = Fraction.from_float(tf).limit_denominator()
+    T = tf_frac / dt_frac
+    ts_frac = dt_frac * np.arange(0, T + 1, dtype=np.int32)
 
-    ts = dt * np.arange(0, T + 1, dtype=np.int32)
-    x_hist = np.zeros((N, len(ts), nx))
+    x_hist = np.zeros((N, len(ts_frac), nx))
 
     if isinstance(u, np.ndarray):
         u_hist = u
     else:
         assert u(0.0, obs_fn(0, x_hist)).shape == (N, sys.nu), "Control function must return an array of shape (N, nu)"
-        u_hist = np.zeros((N, len(ts) - 1, sys.nu))
+        u_hist = np.zeros((N, len(ts_frac) - 1, sys.nu))
 
     assert nx == sys.nx, "Initial states must have shape (N, nx)"
     x_hist[:, 0, :] = x0
 
     if pbar:
-        iterator = tqdm(ts[:-1], desc="Simulation progress", total=len(ts) - 1)
+        iterator = tqdm(ts_frac[:-1], desc="Simulation progress", total=len(ts_frac) - 1)
     else:
-        iterator = ts[:-1]
+        iterator = ts_frac[:-1]
 
     for i, t_frac in enumerate(iterator):
         t = float(t_frac)
@@ -63,7 +64,7 @@ def simulate_batch(sys: DynamicalSystem,
         # # Project state if necessary to keep it in the manifold
         # x_hist[:, i + 1, :] = sys.project_state(x_hist[:, i + 1, :])
 
-    return ts.astype(np.float32), x_hist, u_hist
+    return ts_frac.astype(np.float32), x_hist, u_hist
 
 
 def simulate(sys: DynamicalSystem,

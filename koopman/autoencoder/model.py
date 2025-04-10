@@ -74,7 +74,7 @@ class KoopmanAutoencoder(nn.Module):
 
         # A matrix is stable by construction
         self.Q = nn.Parameter(torch.empty((nz, nz)))
-        self.C = nn.Parameter(torch.zeros((nz, )))
+        self.C = nn.Parameter(-torch.ones((nz, )))
         torch.nn.init.eye_(self.Q)
         # self.A = nn.Parameter(torch.zeros((nz, nz)))
         # torch.nn.init.eye_(self.A)

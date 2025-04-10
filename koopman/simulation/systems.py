@@ -120,11 +120,15 @@ class NonlinearAttractor2D(DynamicalSystem):
 
 
 class VanDerPolOscillator(DynamicalSystem):
+    @dataclass
+    class Params:
+        mu: float
+
     nx = 2
     nu = 1
 
-    def __init__(self) -> None:
-        super().__init__("VanDerPolOscillator", None)
+    def __init__(self, params) -> None:
+        super().__init__("VanDerPolOscillator", params)
 
     def dynamics(self, x, u):
         is_batch = len(x.shape) == 2
@@ -135,8 +139,8 @@ class VanDerPolOscillator(DynamicalSystem):
         x1 = x[:, 0, None]
         x2 = x[:, 1, None]
 
-        x1_dot = 2.0 * x2
-        x2_dot = -0.8 * x1 + 2.0 * x2 - 10.0 * x1 ** 2 * x2 + u
+        x1_dot = x2
+        x2_dot = self.params.mu * (1 - x1 ** 2) * x2 - x1 + u
 
         out = np.column_stack([x1_dot, x2_dot])
 
@@ -144,6 +148,111 @@ class VanDerPolOscillator(DynamicalSystem):
             return out
         else:
             return np.squeeze(out, axis=0)
+
+
+class CircularMotion(DynamicalSystem):
+    nx = 4
+    nu = 2
+
+    def __init__(self) -> None:
+        super().__init__("CircularMotion", None)
+
+    def dynamics(self, x, u):
+        is_batch = len(x.shape) == 2
+
+        if not is_batch:
+            x = np.expand_dims(x, axis=0)
+
+        x1 = x[:, 0, None]
+        x2 = x[:, 1, None]
+        v1 = x[:, 2, None]
+        v2 = x[:, 3, None]
+
+        u1 = u[:, 0, None]
+        u2 = u[:, 1, None]
+
+        r = np.sqrt(x1 ** 2 + x2 ** 2)
+        omega = (x1 * v2 - x2 * v1) / r ** 2
+
+        a1 = -omega ** 2 * x1 + u1
+        a2 = -omega ** 2 * x2 + u2
+
+        out = np.column_stack([v1, v2, a1, a2])
+
+        if is_batch:
+            return out
+        else:
+            return np.squeeze(out, axis=0)
+
+
+class DuffingOscillator(DynamicalSystem):
+    @dataclass
+    class Params:
+        delta: float  # Damping coefficient
+        alpha: float  # Stiffness coefficient
+        beta: float  # Nonlinearity coefficient
+
+    nx = 2
+    nu = 1
+
+    def __init__(self, params: Params) -> None:
+        super().__init__("DuffingOscillator", params)
+
+    def dynamics(self, x, u):
+        is_batch = len(x.shape) == 2
+
+        if not is_batch:
+            x = np.expand_dims(x, axis=0)
+            u = np.expand_dims(u, axis=0)
+
+        x1 = x[:, 0, None]
+        x2 = x[:, 1, None]
+
+        x1_dot = x2
+        x2_dot = -self.params.delta * x2 - self.params.alpha * x1 - self.params.beta * x1 ** 3 + u
+
+        out = np.column_stack([x1_dot, x2_dot])
+
+        if is_batch:
+            return out
+        else:
+            return np.squeeze(out, axis=0)
+
+
+class TwoBodySystem(DynamicalSystem):
+    @dataclass
+    class Params:
+        GM: float  # Gravitational parameter G*M (e.g., mu = 398600 km^3/s^2 for Earth)
+
+    nx = 4
+    nu = 2  # No control
+
+    def __init__(self, params: Params) -> None:
+        super().__init__("TwoBodySystem", params)
+
+    def dynamics(self, x, u):
+        is_batch = len(x.shape) == 2
+        if not is_batch:
+            x = np.expand_dims(x, axis=0)
+            u = np.expand_dims(u, axis=0)
+
+        rx = x[:, 0]
+        ry = x[:, 1]
+        vx = x[:, 2]
+        vy = x[:, 3]
+
+        ux = u[:, 0]
+        uy = u[:, 1]
+
+        r = np.linalg.norm(x[:, :2], axis=-1)
+        factor = -self.params.GM / r ** 3
+
+        ax = factor * rx + ux
+        ay = factor * ry + uy
+
+        out = np.column_stack([vx, vy, ax, ay])
+
+        return out if is_batch else out[0]
 
 
 class Pendulum(DynamicalSystem):
