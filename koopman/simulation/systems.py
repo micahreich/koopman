@@ -407,6 +407,25 @@ class CartPole(DynamicalSystem):
             # Update pole position
             self.rod.set_data([x, pole_x], [0, pole_y])
 
+# class Bicycle(DynamicalSystem):
+#     NX = 5  # x, y, theta, v, delta
+#
+#     @dataclass
+#     class Params:
+#         m: float
+#         L: float
+#
+#     def __init__(self, params: Params) -> None:
+#         super().__init__("Bicycle", params)
+#
+#     def batch_dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
+#         N1, nx = x.shape
+#         N2, nu = u.shape
+#
+#         assert nx == self.nx
+#         assert nu == self.nu
+#         assert N1 == N2
+#
 
 if __name__ == "__main__":
     cart_pole = CartPole(params=CartPole.Params(1, 1, 1, 9.81))
