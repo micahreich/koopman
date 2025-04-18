@@ -31,16 +31,14 @@ def simulate_with_observables(model: KoopmanAutoencoder, x0: torch.Tensor, uhist
     xhist_pred = torch.empty(Tm1 + 1, model.nx).to(device)
     zhist = torch.empty(Tm1 + 1, model.nz).to(device)
 
-    print()
-
     z_jm1 = model.forward(x0)
     xhist_pred[0, :] = model.project(z_jm1)
     zhist[0, :] = z_jm1
 
-    A, B, Cs, d = model.get_dynamics()
+    A, B, Cs = model.get_dynamics()
 
     for j in range(1, Tm1 + 1):
-        z_jm1 = model.predict_z_next(z_jm1, uhist[j - 1, :], A, B, Cs, d)
+        z_jm1 = model.predict_z_next(z_jm1, uhist[j - 1, :], A, B, Cs)
 
         xhist_pred[j, :] = model.project(z_jm1)
         zhist[j, :] = z_jm1
@@ -85,6 +83,7 @@ def train(model: KoopmanAutoencoder,
           evaluate: Optional[Callable] = None,
           save_dir: Optional[str] = ""):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 

@@ -258,15 +258,15 @@ class TwoBodySystem(DynamicalSystem):
 class Pendulum(DynamicalSystem):
     @dataclass
     class Params:
-        m: float  # Mass of the pendulum
-        l: float  # Length of the pendulum
-        g: float  # Gravity
-        b: float  # Damping coefficient
+        m: float = 1.0  # Mass of the pendulum
+        l: float = 1.0  # Length of the pendulum
+        g: float = 9.81  # Gravity
+        b: float = 0.0  # Damping coefficient
 
     nx = 2  # [theta, theta_dot]
     nu = 1  # Torque input
 
-    def __init__(self, params: Params) -> None:
+    def __init__(self, params=Params()) -> None:
         super().__init__("Pendulum", params)
 
     def dynamics(self, x: np.ndarray, u: np.ndarray) -> np.ndarray:
@@ -274,6 +274,7 @@ class Pendulum(DynamicalSystem):
 
         if not is_batch:
             x = np.expand_dims(x, axis=0)
+            u = np.expand_dims(u, axis=0)
 
         N1, nx = x.shape
         N2, nu = u.shape
