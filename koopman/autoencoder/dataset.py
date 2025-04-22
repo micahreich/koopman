@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Optional, Union
 
 import einops
 import numpy as np
@@ -15,12 +15,15 @@ class KoopmanDatasetStats:
     x_std: torch.Tensor = field(init=False)
     nx: int = field(init=False)
     nu: int = field(init=False)
+    normalize_indices: np.ndarray = field(init=False)
     dt: float = field(init=False)
     N_sys: int = field(init=False)
     H: int = field(init=False)
 
     @staticmethod
-    def from_tensors(x_hist: torch.Tensor, u_hist: torch.Tensor, dt: float) -> 'KoopmanDatasetStats':
+    def from_tensors(x_hist: torch.Tensor, u_hist: torch.Tensor, 
+                     dt: float,
+                     normalize_indices: Optional[np.ndarray] = None) -> 'KoopmanDatasetStats':
         stats = KoopmanDatasetStats()
         stats.x_mean = (x_hist.mean(dim=(0, 1))).float()
         stats.x_std = (x_hist.std(dim=(0, 1)) + 1e-8).float()  # Avoid division by zero
@@ -30,6 +33,12 @@ class KoopmanDatasetStats:
         stats.nx = x_hist.shape[-1]
         stats.nu = u_hist.shape[-1]
         stats.dt = dt
+
+        if normalize_indices is not None:
+            assert len(normalize_indices.shape) == 1
+            stats.normalize_indices = normalize_indices
+        else:
+            stats.normalize_indices = np.arange(stats.nx)
 
         N_sys, H, _ = x_hist.shape
         stats.N_sys = N_sys
@@ -55,7 +64,9 @@ H={self.H}"""
     def normalize_x(self, x: torch.Tensor) -> torch.Tensor:
         mean = self._reshape_stats(self.x_mean, x.dim(), x.device)
         std = self._reshape_stats(self.x_std, x.dim(), x.device)
-        return (x - mean) / std
+        normalized_x = torch.clone(x)
+        normalized_x[..., self.normalize_indices] = ((x - mean) / std)[..., self.normalize_indices]
+        return normalized_x
 
     def normalize_u(self, u: torch.Tensor) -> torch.Tensor:
         mean = self._reshape_stats(self.u_mean, u.dim(), u.device)
@@ -65,7 +76,9 @@ H={self.H}"""
     def denormalize_x(self, x: torch.Tensor) -> torch.Tensor:
         mean = self._reshape_stats(self.x_mean, x.dim(), x.device)
         std = self._reshape_stats(self.x_std, x.dim(), x.device)
-        return x * std + mean
+        denormalized_x = torch.clone(x)
+        denormalized_x[..., self.normalize_indices] = (x*std + mean)[..., self.normalize_indices]
+        return denormalized_x
 
     def denormalize_u(self, u: torch.Tensor) -> torch.Tensor:
         mean = self._reshape_stats(self.u_mean, u.dim(), u.device)
@@ -119,7 +132,6 @@ class KoopmanDataset(Dataset):
     def sample_eval_trajectories(self, n: int = 1):
         sys_idx = torch.randint(0, self.N_sys_eval, (n, ))
         sys_idx = self.indices_eval[sys_idx]
-
         return self.x_hist[sys_idx], self.u_hist[sys_idx], self.ts
 
     @staticmethod

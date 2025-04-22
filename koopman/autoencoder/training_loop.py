@@ -87,11 +87,6 @@ def train(model: KoopmanAutoencoder,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    # print(model.Q.device)
-    # print(model.C.device)
-    # print(model.A_continuous.device)
-    # print(model.A.device)
-
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     # # Experiment with different learning rates for the dynamics and observables
@@ -142,7 +137,6 @@ def train(model: KoopmanAutoencoder,
             for step, batch in enumerate(pbar):
                 # Move the batch to the model's device and set requires_grad
                 # for Jacobian regularization
-                # x0, u0, x_horizon, u_horizon = map(lambda x: x.to(device).requires_grad_(True), batch)
                 x0, u0, x_horizon, u_horizon = map(lambda x: x.to(device), batch)
                 B = x0.shape[0]
                 pred_horizon = x_horizon.shape[1]
@@ -153,11 +147,10 @@ def train(model: KoopmanAutoencoder,
                 z_horizon_flat = model.forward(x_horizon_flat)
                 z_horizon = model.unflatten_batch(B, z_horizon_flat)
 
-                # loss_total, _loss_parts = model.loss(xhist_flat, uhist_flat, zhist_flat)
                 loss_total, _loss_parts = model.loss(xs=(x0, x_horizon),
-                                                     us=(u0, u_horizon),
-                                                     zs=(z0, z_horizon),
-                                                     pred_horizon=pred_horizon)
+                                                   us=(u0, u_horizon),
+                                                   zs=(z0, z_horizon),
+                                                   pred_horizon=pred_horizon)
 
                 optimizer.zero_grad()
                 loss_total.backward()

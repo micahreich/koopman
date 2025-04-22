@@ -408,6 +408,17 @@ class CartPole(DynamicalSystem):
             # Update pole position
             self.rod.set_data([x, pole_x], [0, pole_y])
 
+
+def unwrap_angle(arr: np.ndarray) -> np.ndarray:
+    assert arr.shape[-1] == 3
+    unwrapped_shape = list(arr.shape)
+    unwrapped_shape[-1] = 2
+    unwrapped = np.empty(unwrapped_shape, dtype=arr.dtype)
+    unwrapped[..., 0] = np.arctan2(arr[..., 1], arr[..., 0])
+    unwrapped[..., 1] = arr[..., 2]
+    return unwrapped
+
+
 # class Bicycle(DynamicalSystem):
 #     NX = 5  # x, y, theta, v, delta
 #
