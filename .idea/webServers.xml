@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="e7ed1180-06fa-4b7d-a6f9-84d3c0c4cdcf" name="tauv-dwalin">
+        <fileTransfer accessType="SFTP" host="tauv-dwalin.lan.local.cmu.edu" port="22" sshConfigId="9a56ef11-aef4-46b0-ae37-b2f50177dd4a" sshConfig="gleb@tauv-dwalin.lan.local.cmu.edu:22 key" keyPair="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
