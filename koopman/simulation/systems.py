@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
 
+import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -189,34 +190,33 @@ class DuffingOscillator(DynamicalSystem):
     @dataclass
     class Params:
         delta: float  # Damping coefficient
-        alpha: float  # Stiffness coefficient
-        beta: float  # Nonlinearity coefficient
+        # alpha: float  # Stiffness coefficient
+        # beta: float  # Nonlinearity coefficient
 
     nx = 2
     nu = 1
 
     def __init__(self, params: Params) -> None:
         super().__init__("DuffingOscillator", params)
+        self._batched_dynamics = jax.vmap(self._dynamics, in_axes=(0, 0))
+
+    def _dynamics(self, x, u):
+        x1 = x[0]
+        x2 = x[1]
+        u = u[0]
+        x1_dot = x2
+        x2_dot = -self.params.delta * x2 + x1 - x1 ** 3 + u
+
+        return jnp.array([x1_dot, x2_dot])
 
     def dynamics(self, x, u):
-        is_batch = len(x.shape) == 2
-
-        if not is_batch:
-            x = np.expand_dims(x, axis=0)
-            u = np.expand_dims(u, axis=0)
-
-        x1 = x[:, 0, None]
-        x2 = x[:, 1, None]
-
-        x1_dot = x2
-        x2_dot = -self.params.delta * x2 - self.params.alpha * x1 - self.params.beta * x1 ** 3 + u
-
-        out = np.column_stack([x1_dot, x2_dot])
-
-        if is_batch:
-            return out
+        # Detect whether input is batched (2D array) or single instance (1D)
+        if x.ndim == 1 and u.ndim == 1:
+            return self._dynamics(x, u)
+        elif x.ndim == 2 and u.ndim == 2:
+            return self._batched_dynamics(x, u)
         else:
-            return np.squeeze(out, axis=0)
+            raise ValueError("x and u must both be either batched (2D) or single (1D)")
 
 
 class TwoBodySystem(DynamicalSystem):
@@ -410,14 +410,22 @@ class CartPole(DynamicalSystem):
 
 
 if __name__ == "__main__":
-    cart_pole = CartPole(params=CartPole.Params(1, 1, 1, 9.81))
+    d = DuffingOscillator(DuffingOscillator.Params(delta=0.2))
 
-    xbar = np.array([0, np.pi - 0.4, 0, 0], dtype=np.float32)
-    ubar = np.array([24.24184], dtype=np.float32)
+    xs = np.random.rand(5, 2)
+    us = np.random.rand(5, 1)
 
-    print(cart_pole.dynamics(xbar, ubar))
+    print(d.dynamics(xs, us))
+    print(d.dynamics(xs[0], us[0]))
 
-    xbar = np.tile(xbar, (5, 1))
-    ubar = np.tile(ubar, (5, 1))
+    # cart_pole = CartPole(params=CartPole.Params(1, 1, 1, 9.81))
 
-    print(cart_pole.batch_dynamics(xbar, ubar))
+    # xbar = np.array([0, np.pi - 0.4, 0, 0], dtype=np.float32)
+    # ubar = np.array([24.24184], dtype=np.float32)
+
+    # print(cart_pole.dynamics(xbar, ubar))
+
+    # xbar = np.tile(xbar, (5, 1))
+    # ubar = np.tile(ubar, (5, 1))
+
+    # print(cart_pole.batch_dynamics(xbar, ubar))
